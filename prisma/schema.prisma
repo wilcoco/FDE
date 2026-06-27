@@ -1,0 +1,277 @@
+// FlowDesk data model
+// ---------------------------------------------------------------------------
+// MULTI-TENANCY DESIGN (core architectural constraint #1)
+//
+// Every tenant-owned row carries `tenantId`. The `Tenant` is the aggregate
+// root: ALL of a group's data is reachable by `WHERE tenantId = :id`. This
+// makes a tenant fully self-contained, so a single group can later be lifted
+// out of the shared database into its own dedicated database / server with no
+// schema changes (see docs/TENANT-EXTRACTION.md).
+//
+// PROCESS-GRAPH MODEL (core differentiator #2)
+//
+// We do NOT model work as a linear "draft -> approver1 -> approver2" chain.
+// Instead, a ProcessDefinition is a DIRECTED GRAPH of nodes and edges that
+// mirrors how the real work actually flows. Approval (결재) is just one node
+// TYPE among many (task / automation / condition / ...). A running
+// ProcessInstance tracks live progress through that graph, so you can see the
+// whole business process and where approvals sit inside it.
+// ---------------------------------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Plan {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+// How this tenant's data is hosted.
+enum IsolationMode {
+  SHARED // lives in the multi-tenant database (default)
+  DEDICATED // has been migrated to its own database/server
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  DISABLED
+}
+
+/// The kind of a node in a process graph.
+enum NodeType {
+  START // entry point (exactly one per definition)
+  TASK // a manual work item; completes when the assignee marks it done
+  APPROVAL // a 결재 node; the assignee approves or rejects
+  AUTOMATION // an automated action; executes and auto-completes
+  CONDITION // a gateway; routes to an outgoing edge based on instance data
+  END // terminal node
+}
+
+enum InstanceStatus {
+  RUNNING
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+/// Live state of a node within a running instance.
+enum NodeStatus {
+  WAITING // not yet reached by the flow
+  ACTIVE // currently actionable (waiting on a human or running)
+  DONE // completed (task done / automation ran / condition routed)
+  APPROVED // approval granted
+  REJECTED // approval denied — usually terminates the instance
+  SKIPPED // bypassed (e.g. not on the taken branch)
+}
+
+/// A group / company / organization. The unit of isolation and of billing.
+model Tenant {
+  id            String        @id @default(cuid())
+  slug          String        @unique // used for subdomain / routing, e.g. "acme"
+  name          String
+  plan          Plan          @default(FREE)
+  isolationMode IsolationMode @default(SHARED)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  users       User[]
+  invitations Invitation[]
+  definitions ProcessDefinition[]
+  nodes       ProcessNode[]
+  edges       ProcessEdge[]
+  instances   ProcessInstance[]
+  nodeRuns    NodeInstance[]
+  auditLogs   AuditLog[]
+}
+
+model User {
+  id           String     @id @default(cuid())
+  tenantId     String
+  email        String
+  name         String
+  passwordHash String
+  role         Role       @default(MEMBER)
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  createdDefinitions ProcessDefinition[] @relation("DefinitionCreator")
+  initiatedInstances ProcessInstance[]   @relation("InstanceInitiator")
+  assignedNodeRuns   NodeInstance[]      @relation("NodeAssignee")
+  sentInvitations    Invitation[]        @relation("InvitationInviter")
+  auditLogs          AuditLog[]
+
+  // identity is unique WITHIN a tenant, not globally
+  @@unique([tenantId, email])
+  @@index([tenantId])
+}
+
+model Invitation {
+  id          String    @id @default(cuid())
+  tenantId    String
+  email       String
+  role        Role      @default(MEMBER)
+  token       String    @unique
+  invitedById String
+  acceptedAt  DateTime?
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invitedBy User   @relation("InvitationInviter", fields: [invitedById], references: [id])
+
+  @@index([tenantId])
+}
+
+/// A reusable business-process template: a directed graph of nodes + edges
+/// describing how a kind of work actually flows through the organization.
+model ProcessDefinition {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  description String?
+  formSchema  Json     @default("[]") // fields collected when an instance is started
+  isActive    Boolean  @default(true)
+  version     Int      @default(1)
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User              @relation("DefinitionCreator", fields: [createdById], references: [id])
+  nodes     ProcessNode[]
+  edges     ProcessEdge[]
+  instances ProcessInstance[]
+
+  @@index([tenantId])
+}
+
+/// A single node in a process graph.
+model ProcessNode {
+  id           String   @id @default(cuid())
+  tenantId     String
+  definitionId String
+  key          String // stable key unique within the definition (used by edges/config)
+  type         NodeType
+  name         String
+  // type-specific config, e.g. { assigneeId } for APPROVAL/TASK,
+  // { action, params } for AUTOMATION, { field, branches } for CONDITION.
+  config       Json     @default("{}")
+  posX         Int      @default(0)
+  posY         Int      @default(0)
+
+  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  definition  ProcessDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+  outgoing    ProcessEdge[]     @relation("EdgeFrom")
+  incoming    ProcessEdge[]     @relation("EdgeTo")
+  nodeRuns    NodeInstance[]
+
+  @@unique([definitionId, key])
+  @@index([tenantId])
+  @@index([definitionId])
+}
+
+/// A directed edge connecting two nodes within the same definition.
+/// `condition` lets CONDITION gateways pick which edge to follow.
+model ProcessEdge {
+  id           String   @id @default(cuid())
+  tenantId     String
+  definitionId String
+  fromNodeId   String
+  toNodeId     String
+  label        String?
+  condition    Json     @default("{}") // e.g. { field: "amount", op: "gt", value: 1000000 }
+  order        Int      @default(0)
+
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  definition ProcessDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+  from       ProcessNode       @relation("EdgeFrom", fields: [fromNodeId], references: [id], onDelete: Cascade)
+  to         ProcessNode       @relation("EdgeTo", fields: [toNodeId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([definitionId])
+  @@index([fromNodeId])
+}
+
+/// A live run of a definition — one actual piece of work moving through the graph.
+model ProcessInstance {
+  id           String         @id @default(cuid())
+  tenantId     String
+  definitionId String
+  title        String
+  data         Json           @default("{}") // form values + accumulated outputs
+  status       InstanceStatus @default(RUNNING)
+  initiatorId  String
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  completedAt  DateTime?
+
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  definition ProcessDefinition @relation(fields: [definitionId], references: [id])
+  initiator  User              @relation("InstanceInitiator", fields: [initiatorId], references: [id])
+  nodeRuns   NodeInstance[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+}
+
+/// The runtime state of one node for one instance.
+model NodeInstance {
+  id         String     @id @default(cuid())
+  tenantId   String
+  instanceId String
+  nodeId     String
+  // snapshot of the node so history survives later definition edits
+  nodeKey    String
+  type       NodeType
+  name       String
+  status     NodeStatus @default(WAITING)
+  assigneeId String?
+  comment    String?
+  output     Json       @default("{}")
+  activatedAt DateTime?
+  decidedAt  DateTime?
+  createdAt  DateTime   @default(now())
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  instance ProcessInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  node     ProcessNode     @relation(fields: [nodeId], references: [id])
+  assignee User?           @relation("NodeAssignee", fields: [assigneeId], references: [id])
+
+  @@index([tenantId])
+  @@index([instanceId])
+  @@index([tenantId, assigneeId, status])
+}
+
+/// Append-only activity trail, scoped per tenant.
+model AuditLog {
+  id        String   @id @default(cuid())
+  tenantId  String
+  actorId   String?
+  action    String
+  target    String?
+  meta      Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actor  User?  @relation(fields: [actorId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, createdAt])
+}
