@@ -15,6 +15,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "tenant:extract": "tsx scripts/extract-tenant.ts",
+    "tenant:import": "tsx scripts/import-tenant.ts",
     "postinstall": "prisma generate"
   },
   "prisma": {

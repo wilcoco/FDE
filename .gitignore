@@ -31,3 +31,6 @@ npm-debug.log*
 
 # tenant extraction output
 /exports
+
+# typescript build info
+*.tsbuildinfo
