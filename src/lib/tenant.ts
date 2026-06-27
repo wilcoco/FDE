@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import type { Prisma } from "@prisma/client";
 
 /**
  * Tenant-scoped data access.
@@ -58,7 +59,7 @@ export function tenantScope(tenantId: string) {
           actorId: entry.actorId,
           action: entry.action,
           target: entry.target,
-          meta: entry.meta ?? {},
+          meta: (entry.meta ?? {}) as Prisma.InputJsonValue,
         },
       }),
   };

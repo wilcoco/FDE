@@ -1,21 +1,16 @@
 // FlowDesk data model
 // ---------------------------------------------------------------------------
-// MULTI-TENANCY DESIGN (core architectural constraint #1)
+// MULTI-TENANCY (constraint #1): every tenant-owned row carries `tenantId`.
+// The Tenant is the aggregate root — all of a group's data is reachable by
+// `WHERE tenantId = :id`, so a single group can be lifted into its own
+// dedicated database with no schema change (docs/TENANT-EXTRACTION.md).
 //
-// Every tenant-owned row carries `tenantId`. The `Tenant` is the aggregate
-// root: ALL of a group's data is reachable by `WHERE tenantId = :id`. This
-// makes a tenant fully self-contained, so a single group can later be lifted
-// out of the shared database into its own dedicated database / server with no
-// schema changes (see docs/TENANT-EXTRACTION.md).
+// PROCESS-GRAPH (constraint #2): work is a directed graph of nodes/edges that
+// mirrors how real work flows. Approval (결재) is one node TYPE among many.
 //
-// PROCESS-GRAPH MODEL (core differentiator #2)
-//
-// We do NOT model work as a linear "draft -> approver1 -> approver2" chain.
-// Instead, a ProcessDefinition is a DIRECTED GRAPH of nodes and edges that
-// mirrors how the real work actually flows. Approval (결재) is just one node
-// TYPE among many (task / automation / condition / ...). A running
-// ProcessInstance tracks live progress through that graph, so you can see the
-// whole business process and where approvals sit inside it.
+// INSTANCE-OWNS-GRAPH (constraint #3): a running instance copies the template
+// into its own NodeInstance + InstanceEdge set, so it can be modified at
+// runtime (ad-hoc 협조업무 insertion) without touching the template.
 // ---------------------------------------------------------------------------
 
 generator client {
@@ -27,16 +22,17 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ── enums ──────────────────────────────────────────────────────────────────
+
 enum Plan {
   FREE
   PRO
   ENTERPRISE
 }
 
-// How this tenant's data is hosted.
 enum IsolationMode {
-  SHARED // lives in the multi-tenant database (default)
-  DEDICATED // has been migrated to its own database/server
+  SHARED
+  DEDICATED
 }
 
 enum Role {
@@ -51,14 +47,19 @@ enum UserStatus {
   DISABLED
 }
 
-/// The kind of a node in a process graph.
 enum NodeType {
-  START // entry point (exactly one per definition)
-  TASK // a manual work item; completes when the assignee marks it done
-  APPROVAL // a 결재 node; the assignee approves or rejects
-  AUTOMATION // an automated action; executes and auto-completes
-  CONDITION // a gateway; routes to an outgoing edge based on instance data
-  END // terminal node
+  START
+  TASK
+  APPROVAL
+  AUTOMATION
+  CONDITION
+  END
+}
+
+/// APPROVAL node sub-kind: a general decision vs a cost/budget control decision.
+enum ApprovalKind {
+  GENERAL
+  COST
 }
 
 enum InstanceStatus {
@@ -68,34 +69,126 @@ enum InstanceStatus {
   CANCELLED
 }
 
-/// Live state of a node within a running instance.
 enum NodeStatus {
-  WAITING // not yet reached by the flow
-  ACTIVE // currently actionable (waiting on a human or running)
-  DONE // completed (task done / automation ran / condition routed)
-  APPROVED // approval granted
-  REJECTED // approval denied — usually terminates the instance
-  SKIPPED // bypassed (e.g. not on the taken branch)
+  WAITING
+  ACTIVE
+  DONE
+  APPROVED
+  REJECTED
+  SKIPPED
 }
 
-/// A group / company / organization. The unit of isolation and of billing.
+enum DefinitionStatus {
+  DRAFT // being authored
+  PENDING // submitted, awaiting registration approval
+  ACTIVE // approved, runnable
+  REJECTED // registration approval denied
+  ARCHIVED
+}
+
+enum ApprovalRoutingType {
+  ORG_CHAIN // up the reporting line to a target rank
+  AMOUNT_TIER // cost-control: chain length determined by amount × 전결규정
+  FIXED // explicit list of approvers
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum ApprovalStepStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  SKIPPED
+}
+
+/// What an ApprovalRequest is deciding on.
+enum ApprovalSubjectType {
+  PROCESS_REGISTRATION
+  NODE_APPROVAL
+  INSTANCE_CHANGE
+}
+
+enum ObjectiveType {
+  OKR // qualitative
+  KPI // quantitative
+}
+
+enum ObjectiveLevel {
+  COMPANY
+  DEPARTMENT
+  INDIVIDUAL
+}
+
+enum GoalStatus {
+  ACTIVE
+  DONE
+  ARCHIVED
+}
+
+enum DirectiveStatus {
+  OPEN
+  RESOLVED
+  DECLINED
+}
+
+enum WorkLogStatus {
+  IN_PROGRESS
+  SUBMITTED
+}
+
+enum InstanceChangeMode {
+  PARALLEL // side-branch; main flow continues
+  INLINE // main flow waits for this task
+}
+
+enum InstanceChangeStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  APPLIED
+}
+
+// ── tenant & identity ───────────────────────────────────────────────────────
+
+/// A group / company / organization. The unit of isolation and billing.
 model Tenant {
   id            String        @id @default(cuid())
-  slug          String        @unique // used for subdomain / routing, e.g. "acme"
+  slug          String        @unique
   name          String
   plan          Plan          @default(FREE)
   isolationMode IsolationMode @default(SHARED)
+  /// if true, only org-chart superiors may issue work directives
+  directiveRestrictedToSuperior Boolean @default(false)
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  users       User[]
-  invitations Invitation[]
-  definitions ProcessDefinition[]
-  nodes       ProcessNode[]
-  edges       ProcessEdge[]
-  instances   ProcessInstance[]
-  nodeRuns    NodeInstance[]
-  auditLogs   AuditLog[]
+  users          User[]
+  departments    Department[]
+  positions      Position[]
+  authorityRules ApprovalAuthorityRule[]
+  invitations    Invitation[]
+  objectives     Objective[]
+  keyResults     KeyResult[]
+  goals          Goal[]
+  definitions    ProcessDefinition[]
+  nodes          ProcessNode[]
+  edges          ProcessEdge[]
+  instances      ProcessInstance[]
+  nodeRuns       NodeInstance[]
+  instanceEdges  InstanceEdge[]
+  workLogs       WorkLog[]
+  comments       Comment[]
+  directives     Directive[]
+  approvals      ApprovalRequest[]
+  approvalSteps  ApprovalStep[]
+  changes        InstanceChange[]
+  notifications  Notification[]
+  auditLogs      AuditLog[]
 }
 
 model User {
@@ -106,19 +199,84 @@ model User {
   passwordHash String
   role         Role       @default(MEMBER)
   status       UserStatus @default(ACTIVE)
+  departmentId String?
+  positionId   String?
+  managerId    String?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  department Department? @relation("DeptMembers", fields: [departmentId], references: [id])
+  position   Position?   @relation(fields: [positionId], references: [id])
+  manager    User?       @relation("Reports", fields: [managerId], references: [id])
+  reports    User[]      @relation("Reports")
 
+  headedDepartments  Department[]        @relation("DeptHead")
   createdDefinitions ProcessDefinition[] @relation("DefinitionCreator")
   initiatedInstances ProcessInstance[]   @relation("InstanceInitiator")
   assignedNodeRuns   NodeInstance[]      @relation("NodeAssignee")
+  workLogs           WorkLog[]           @relation("WorkLogAuthor")
+  comments           Comment[]           @relation("CommentAuthor")
+  directivesIssued   Directive[]         @relation("DirectiveIssuer")
+  approvalSteps      ApprovalStep[]      @relation("StepApprover")
+  approvalRequests   ApprovalRequest[]   @relation("ApprovalRequester")
+  instanceChanges    InstanceChange[]    @relation("ChangeRequester")
+  ownedObjectives    Objective[]         @relation("ObjectiveOwner")
+  ownedGoals         Goal[]              @relation("GoalOwner")
   sentInvitations    Invitation[]        @relation("InvitationInviter")
+  notifications      Notification[]
   auditLogs          AuditLog[]
 
-  // identity is unique WITHIN a tenant, not globally
   @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([managerId])
+}
+
+// ── org chart ───────────────────────────────────────────────────────────────
+
+model Department {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  parentId  String?
+  headId    String?
+  order     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  tenant   Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent   Department?  @relation("DeptTree", fields: [parentId], references: [id])
+  children Department[] @relation("DeptTree")
+  head     User?        @relation("DeptHead", fields: [headId], references: [id])
+  members  User[]       @relation("DeptMembers")
+
+  @@index([tenantId])
+}
+
+/// A rank/title. Higher `rank` = more authority (사원 1 … 대표 6).
+model Position {
+  id       String @id @default(cuid())
+  tenantId String
+  name     String
+  rank     Int    @default(1)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users  User[]
+
+  @@index([tenantId])
+}
+
+/// 전결규정: spending up to `maxAmount` (null = unlimited / top tier) may be
+/// finalized by someone of at least `approverRank`. Cost-control approvals walk
+/// the reporting line up to the first person meeting the required rank.
+model ApprovalAuthorityRule {
+  id           String @id @default(cuid())
+  tenantId     String
+  maxAmount    Int? // upper bound of this tier in 원; null = unlimited
+  approverRank Int // minimum Position.rank required to approve this tier
+  order        Int    @default(0)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
   @@index([tenantId])
 }
 
@@ -139,56 +297,122 @@ model Invitation {
   @@index([tenantId])
 }
 
-/// A reusable business-process template: a directed graph of nodes + edges
-/// describing how a kind of work actually flows through the organization.
-model ProcessDefinition {
-  id          String   @id @default(cuid())
-  tenantId    String
-  name        String
-  description String?
-  formSchema  Json     @default("[]") // fields collected when an instance is started
-  isActive    Boolean  @default(true)
-  version     Int      @default(1)
-  createdById String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+// ── goals: OKR / KPI ────────────────────────────────────────────────────────
 
-  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  createdBy User              @relation("DefinitionCreator", fields: [createdById], references: [id])
-  nodes     ProcessNode[]
-  edges     ProcessEdge[]
-  instances ProcessInstance[]
+model Objective {
+  id           String         @id @default(cuid())
+  tenantId     String
+  type         ObjectiveType  @default(OKR)
+  level        ObjectiveLevel @default(COMPANY)
+  title        String
+  description  String?
+  period       String? // e.g. "2026-Q3"
+  parentId     String? // cascading: company → dept → individual
+  ownerId      String?
+  departmentId String?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent     Objective?  @relation("ObjectiveTree", fields: [parentId], references: [id])
+  children   Objective[] @relation("ObjectiveTree")
+  owner      User?       @relation("ObjectiveOwner", fields: [ownerId], references: [id])
+  keyResults KeyResult[]
+  goals      Goal[]
+
+  @@index([tenantId])
+  @@index([parentId])
+}
+
+model KeyResult {
+  id           String   @id @default(cuid())
+  tenantId     String
+  objectiveId  String
+  title        String
+  metric       String? // what is measured
+  unit         String?
+  targetValue  Float    @default(0)
+  currentValue Float    @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  objective Objective @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([objectiveId])
+}
+
+/// 세부 업무목표 — bridges an OKR/KPI to the processes that achieve it.
+model Goal {
+  id          String     @id @default(cuid())
+  tenantId    String
+  title       String
+  description String?
+  objectiveId String? // optional link
+  ownerId     String?
+  status      GoalStatus @default(ACTIVE)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  objective   Objective?          @relation(fields: [objectiveId], references: [id])
+  owner       User?               @relation("GoalOwner", fields: [ownerId], references: [id])
+  definitions ProcessDefinition[]
 
   @@index([tenantId])
 }
 
-/// A single node in a process graph.
+// ── process templates ───────────────────────────────────────────────────────
+
+model ProcessDefinition {
+  id           String           @id @default(cuid())
+  tenantId     String
+  name         String
+  description  String?
+  goalId       String? // optional goal link
+  sourceManual String? // the natural-language manual it was generated from
+  formSchema   Json             @default("[]") // fields collected at launch
+  status       DefinitionStatus @default(DRAFT)
+  version      Int              @default(1)
+  createdById  String
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  goal      Goal?             @relation(fields: [goalId], references: [id])
+  createdBy User              @relation("DefinitionCreator", fields: [createdById], references: [id])
+  nodes     ProcessNode[]
+  edges     ProcessEdge[]
+  instances ProcessInstance[]
+  approvals ApprovalRequest[] @relation("DefinitionApproval")
+
+  @@index([tenantId])
+}
+
 model ProcessNode {
-  id           String   @id @default(cuid())
+  id           String        @id @default(cuid())
   tenantId     String
   definitionId String
-  key          String // stable key unique within the definition (used by edges/config)
+  key          String
   type         NodeType
   name         String
-  // type-specific config, e.g. { assigneeId } for APPROVAL/TASK,
-  // { action, params } for AUTOMATION, { field, branches } for CONDITION.
-  config       Json     @default("{}")
-  posX         Int      @default(0)
-  posY         Int      @default(0)
+  approvalKind ApprovalKind? // for APPROVAL nodes
+  /// type-specific config: assigneeSpec, automation, conditionField, costRule…
+  config       Json          @default("{}")
+  posX         Int           @default(0)
+  posY         Int           @default(0)
 
-  tenant      Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  definition  ProcessDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
-  outgoing    ProcessEdge[]     @relation("EdgeFrom")
-  incoming    ProcessEdge[]     @relation("EdgeTo")
-  nodeRuns    NodeInstance[]
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  definition ProcessDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+  outgoing   ProcessEdge[]     @relation("EdgeFrom")
+  incoming   ProcessEdge[]     @relation("EdgeTo")
 
   @@unique([definitionId, key])
   @@index([tenantId])
   @@index([definitionId])
 }
 
-/// A directed edge connecting two nodes within the same definition.
-/// `condition` lets CONDITION gateways pick which edge to follow.
 model ProcessEdge {
   id           String   @id @default(cuid())
   tenantId     String
@@ -196,7 +420,7 @@ model ProcessEdge {
   fromNodeId   String
   toNodeId     String
   label        String?
-  condition    Json     @default("{}") // e.g. { field: "amount", op: "gt", value: 1000000 }
+  condition    Json     @default("{}")
   order        Int      @default(0)
 
   tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -206,16 +430,16 @@ model ProcessEdge {
 
   @@index([tenantId])
   @@index([definitionId])
-  @@index([fromNodeId])
 }
 
-/// A live run of a definition — one actual piece of work moving through the graph.
+// ── running instances (own their graph) ─────────────────────────────────────
+
 model ProcessInstance {
   id           String         @id @default(cuid())
   tenantId     String
   definitionId String
   title        String
-  data         Json           @default("{}") // form values + accumulated outputs
+  data         Json           @default("{}")
   status       InstanceStatus @default(RUNNING)
   initiatorId  String
   createdAt    DateTime       @default(now())
@@ -226,40 +450,218 @@ model ProcessInstance {
   definition ProcessDefinition @relation(fields: [definitionId], references: [id])
   initiator  User              @relation("InstanceInitiator", fields: [initiatorId], references: [id])
   nodeRuns   NodeInstance[]
+  edges      InstanceEdge[]
+  changes    InstanceChange[]
 
   @@index([tenantId])
   @@index([tenantId, status])
 }
 
-/// The runtime state of one node for one instance.
 model NodeInstance {
-  id         String     @id @default(cuid())
-  tenantId   String
-  instanceId String
-  nodeId     String
-  // snapshot of the node so history survives later definition edits
-  nodeKey    String
-  type       NodeType
-  name       String
-  status     NodeStatus @default(WAITING)
-  assigneeId String?
-  comment    String?
-  output     Json       @default("{}")
+  id          String        @id @default(cuid())
+  tenantId    String
+  instanceId  String
+  nodeKey     String // routing key within the instance graph
+  type        NodeType
+  name        String
+  approvalKind ApprovalKind?
+  status      NodeStatus    @default(WAITING)
+  assigneeId  String?
+  config      Json          @default("{}")
+  reworkCount Int           @default(0)
+  isAdHoc     Boolean       @default(false) // added at runtime via InstanceChange
   activatedAt DateTime?
-  decidedAt  DateTime?
-  createdAt  DateTime   @default(now())
+  decidedAt   DateTime?
+  createdAt   DateTime      @default(now())
 
-  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  instance ProcessInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
-  node     ProcessNode     @relation(fields: [nodeId], references: [id])
-  assignee User?           @relation("NodeAssignee", fields: [assigneeId], references: [id])
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  instance  ProcessInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  assignee  User?           @relation("NodeAssignee", fields: [assigneeId], references: [id])
+  workLogs  WorkLog[]
+  comments  Comment[]
+  directives Directive[]
+  approval  ApprovalRequest? @relation("NodeApproval")
 
+  @@unique([instanceId, nodeKey])
   @@index([tenantId])
   @@index([instanceId])
   @@index([tenantId, assigneeId, status])
 }
 
-/// Append-only activity trail, scoped per tenant.
+model InstanceEdge {
+  id         String   @id @default(cuid())
+  tenantId   String
+  instanceId String
+  fromKey    String
+  toKey      String
+  label      String?
+  condition  Json     @default("{}")
+  order      Int      @default(0)
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  instance ProcessInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([instanceId])
+}
+
+// ── work logs & feedback ────────────────────────────────────────────────────
+
+model WorkLog {
+  id             String        @id @default(cuid())
+  tenantId       String
+  nodeInstanceId String
+  authorId       String
+  content        String
+  status         WorkLogStatus @default(IN_PROGRESS)
+  attachments    Json          @default("[]")
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  nodeInstance NodeInstance @relation(fields: [nodeInstanceId], references: [id], onDelete: Cascade)
+  author       User         @relation("WorkLogAuthor", fields: [authorId], references: [id])
+  comments     Comment[]
+
+  @@index([tenantId])
+  @@index([nodeInstanceId])
+}
+
+model Comment {
+  id             String   @id @default(cuid())
+  tenantId       String
+  nodeInstanceId String
+  workLogId      String?
+  authorId       String
+  body           String
+  createdAt      DateTime @default(now())
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  nodeInstance NodeInstance @relation(fields: [nodeInstanceId], references: [id], onDelete: Cascade)
+  workLog      WorkLog?     @relation(fields: [workLogId], references: [id], onDelete: Cascade)
+  author       User         @relation("CommentAuthor", fields: [authorId], references: [id])
+
+  @@index([tenantId])
+  @@index([nodeInstanceId])
+}
+
+/// A work directive — reopens the task (rework). Anyone may issue unless the
+/// tenant restricts it to org-chart superiors.
+model Directive {
+  id             String          @id @default(cuid())
+  tenantId       String
+  nodeInstanceId String
+  issuerId       String
+  body           String
+  status         DirectiveStatus @default(OPEN)
+  createdAt      DateTime        @default(now())
+  resolvedAt     DateTime?
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  nodeInstance NodeInstance @relation(fields: [nodeInstanceId], references: [id], onDelete: Cascade)
+  issuer       User         @relation("DirectiveIssuer", fields: [issuerId], references: [id])
+
+  @@index([tenantId])
+  @@index([nodeInstanceId])
+}
+
+// ── common approval module ──────────────────────────────────────────────────
+
+model ApprovalRequest {
+  id          String              @id @default(cuid())
+  tenantId    String
+  subjectType ApprovalSubjectType
+  subjectId   String // id of the definition / node-instance / instance-change
+  routingType ApprovalRoutingType
+  amount      Int? // for AMOUNT_TIER (cost control)
+  status      ApprovalStatus      @default(PENDING)
+  requesterId String
+  currentStep Int                 @default(0)
+  note        String?
+  createdAt   DateTime            @default(now())
+  decidedAt   DateTime?
+
+  tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requester User           @relation("ApprovalRequester", fields: [requesterId], references: [id])
+  steps     ApprovalStep[]
+
+  // optional typed back-links (only one is set depending on subjectType)
+  definitionId   String?
+  definition     ProcessDefinition? @relation("DefinitionApproval", fields: [definitionId], references: [id])
+  nodeInstanceId String?            @unique
+  nodeInstance   NodeInstance?      @relation("NodeApproval", fields: [nodeInstanceId], references: [id])
+  changeId       String?            @unique
+  change         InstanceChange?    @relation("ChangeApproval", fields: [changeId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+}
+
+model ApprovalStep {
+  id         String             @id @default(cuid())
+  tenantId   String
+  requestId  String
+  order      Int
+  approverId String
+  status     ApprovalStepStatus @default(PENDING)
+  comment    String?
+  decidedAt  DateTime?
+  createdAt  DateTime           @default(now())
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  request  ApprovalRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  approver User            @relation("StepApprover", fields: [approverId], references: [id])
+
+  @@index([tenantId])
+  @@index([requestId])
+  @@index([tenantId, approverId, status])
+}
+
+// ── ad-hoc runtime modification (협조업무) ───────────────────────────────────
+
+model InstanceChange {
+  id             String               @id @default(cuid())
+  tenantId       String
+  instanceId     String
+  requesterId    String
+  mode           InstanceChangeMode   @default(PARALLEL)
+  afterNodeKey   String? // insert after this node (the requester's current node)
+  newTaskName    String
+  newTaskAssigneeId String?
+  description    String?
+  status         InstanceChangeStatus @default(PENDING)
+  createdAt      DateTime             @default(now())
+  appliedAt      DateTime?
+
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  instance  ProcessInstance  @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  requester User             @relation("ChangeRequester", fields: [requesterId], references: [id])
+  approval  ApprovalRequest? @relation("ChangeApproval")
+
+  @@index([tenantId])
+  @@index([instanceId])
+}
+
+// ── notifications & audit ───────────────────────────────────────────────────
+
+model Notification {
+  id        String    @id @default(cuid())
+  tenantId  String
+  userId    String
+  type      String
+  title     String
+  body      String?
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([tenantId, userId, readAt])
+}
+
 model AuditLog {
   id        String   @id @default(cuid())
   tenantId  String
