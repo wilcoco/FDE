@@ -49,3 +49,8 @@ Tenant
 
 ## 8. 스택
 Next.js 15(App Router) · TypeScript · Prisma · PostgreSQL · Tailwind v4 · Claude(claude-opus-4-8) · Railway.
+
+## 9. 중장기 방향 (역팔란티어)
+목표 온톨로지를 먼저 선언하고 데이터를 demand-pull로 확보하는 운영 OS. 상세는
+[docs/REVERSE-PALANTIR.md](./docs/REVERSE-PALANTIR.md) 참고. 다음 큰 레버:
+온톨로지 정의 계층(객체·필드·관계·액션) + 데이터 확보 엔진(실행·사람·AI·임포트·백필).
