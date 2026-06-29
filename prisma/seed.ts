@@ -90,6 +90,23 @@ async function main() {
     await completeTask({ tenantId: tenant.id, nodeRunId: applyRun.id, userId: staff.id });
   }
 
+  // flagship: a CEO instruction → coarse milestones (꼭지)
+  const instruction = await prisma.instruction.create({
+    data: {
+      tenantId: tenant.id, authorId: ceo.id, source: "TEXT",
+      objectiveId: obj.id,
+      rawText: "다음 달 신제품 출시 준비해. 마케팅은 홍보안 잡고, 영업은 주요 거래처 사전 영업 돌리고, 생산은 초도 물량 확보해서 출시일 맞춰줘.",
+      summary: "신제품 출시 준비",
+    },
+  });
+  await prisma.milestone.createMany({
+    data: [
+      { tenantId: tenant.id, instructionId: instruction.id, order: 0, title: "마케팅 홍보안 확정", expectedResult: "출시 홍보안 1부 승인", ownerId: lead.id, status: "ACTIVE", activatedAt: new Date() },
+      { tenantId: tenant.id, instructionId: instruction.id, order: 1, title: "주요 거래처 사전 영업", expectedResult: "10개 거래처 사전 수요 확인", ownerId: staff.id, status: "PENDING" },
+      { tenantId: tenant.id, instructionId: instruction.id, order: 2, title: "초도 물량 확보", expectedResult: "출시일 맞춰 초도 1,000개", status: "PENDING" },
+    ],
+  });
+
   console.log("✅ Seeded demo tenant 'acme'");
   console.log("   로그인: slug=acme, email=ceo@acme.com / lead@acme.com / staff@acme.com, password=password");
 }

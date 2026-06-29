@@ -6,7 +6,7 @@ import { decideApproval, markNotificationsRead } from "@/app/actions/approval";
 export default async function Inbox() {
   const { tenant, user } = await requireContext();
 
-  const [steps, tasks, notifications] = await Promise.all([
+  const [steps, tasks, myMilestones, notifications] = await Promise.all([
     prisma.approvalStep.findMany({
       where: { tenantId: tenant.id, approverId: user.id, status: "PENDING" },
       include: {
@@ -23,6 +23,11 @@ export default async function Inbox() {
     prisma.nodeInstance.findMany({
       where: { tenantId: tenant.id, assigneeId: user.id, status: "ACTIVE", type: "TASK", instance: { status: "RUNNING" } },
       include: { instance: true, directives: { where: { status: "OPEN" } } },
+      orderBy: { activatedAt: "desc" },
+    }),
+    prisma.milestone.findMany({
+      where: { tenantId: tenant.id, ownerId: user.id, status: { in: ["ACTIVE", "BLOCKED"] }, instruction: { status: "ACTIVE" } },
+      include: { instruction: true },
       orderBy: { activatedAt: "desc" },
     }),
     prisma.notification.findMany({
@@ -80,9 +85,28 @@ export default async function Inbox() {
         </div>
       </section>
 
+      {/* my milestones (꼭지) */}
+      <section>
+        <h2 className="mb-3 font-semibold">내 꼭지 ({myMilestones.length})</h2>
+        <div className="space-y-2">
+          {myMilestones.length === 0 && <p className="card text-sm text-gray-400">배정된 꼭지가 없습니다.</p>}
+          {myMilestones.map((m) => (
+            <Link key={m.id} href={`/instructions/${m.instructionId}`} className="card flex items-center justify-between transition hover:shadow-md">
+              <div>
+                <span className="font-medium">{m.title}</span>
+                <span className="ml-2 text-sm text-gray-400">{m.instruction.summary ?? ""}</span>
+                {m.status === "BLOCKED" && <span className="badge ml-2 bg-red-100 text-red-700">막힘</span>}
+                {m.expectedResult && <p className="text-xs text-gray-400">기대결과: {m.expectedResult}</p>}
+              </div>
+              <span className="text-sm text-indigo-600">열기 →</span>
+            </Link>
+          ))}
+        </div>
+      </section>
+
       {/* tasks */}
       <section>
-        <h2 className="mb-3 font-semibold">내 작업 ({tasks.length})</h2>
+        <h2 className="mb-3 font-semibold">내 작업 (프로세스) ({tasks.length})</h2>
         <div className="space-y-2">
           {tasks.length === 0 && <p className="card text-sm text-gray-400">진행할 작업이 없습니다.</p>}
           {tasks.map((t) => (

@@ -189,6 +189,9 @@ model Tenant {
   changes        InstanceChange[]
   notifications  Notification[]
   auditLogs      AuditLog[]
+  instructions   Instruction[]
+  milestones     Milestone[]
+  syntheses      StrategySynthesis[]
 }
 
 model User {
@@ -226,6 +229,9 @@ model User {
   sentInvitations    Invitation[]        @relation("InvitationInviter")
   notifications      Notification[]
   auditLogs          AuditLog[]
+  authoredInstructions Instruction[]       @relation("InstructionAuthor")
+  ownedMilestones      Milestone[]         @relation("MilestoneOwner")
+  createdSyntheses     StrategySynthesis[] @relation("SynthesisCreator")
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -316,9 +322,10 @@ model Objective {
   tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   parent     Objective?  @relation("ObjectiveTree", fields: [parentId], references: [id])
   children   Objective[] @relation("ObjectiveTree")
-  owner      User?       @relation("ObjectiveOwner", fields: [ownerId], references: [id])
-  keyResults KeyResult[]
-  goals      Goal[]
+  owner        User?         @relation("ObjectiveOwner", fields: [ownerId], references: [id])
+  keyResults   KeyResult[]
+  goals        Goal[]
+  instructions Instruction[]
 
   @@index([tenantId])
   @@index([parentId])
@@ -673,6 +680,96 @@ model AuditLog {
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   actor  User?  @relation(fields: [actorId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, createdAt])
+}
+
+// ── flagship: CEO instruction → coarse milestones (꼭지) ─────────────────────
+// The owner speaks/writes intent; AI decomposes it into COARSE milestones
+// (꼭지: order + owner + expected result + proof) — not a detailed BPM flow.
+// The org self-organizes the detail; the owner manages only the key nodes and
+// their results. A separate AI pass synthesizes strategic coherence across the
+// stream of instructions (StrategySynthesis).
+
+enum InstructionSource {
+  TEXT
+  VOICE
+}
+
+enum InstructionStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum MilestoneStatus {
+  PENDING // not started
+  ACTIVE // in progress (the org is on it)
+  BLOCKED // stuck — surfaces to the owner
+  DONE // result delivered + proof
+}
+
+/// A single instruction from the owner (the unit of intent capture).
+model Instruction {
+  id        String            @id @default(cuid())
+  tenantId  String
+  authorId  String
+  rawText   String
+  summary   String? // AI one-line summary
+  source    InstructionSource @default(TEXT)
+  status    InstructionStatus @default(ACTIVE)
+  objectiveId String? // optional link to a strategic objective
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  author     User        @relation("InstructionAuthor", fields: [authorId], references: [id])
+  objective  Objective?  @relation(fields: [objectiveId], references: [id])
+  milestones Milestone[]
+
+  @@index([tenantId])
+  @@index([tenantId, createdAt])
+}
+
+/// A coarse milestone (꼭지) the owner manages: order, owner, expected result,
+/// status, and proof (links/notes/files captured from wherever work happened).
+model Milestone {
+  id             String          @id @default(cuid())
+  tenantId       String
+  instructionId  String
+  order          Int             @default(0)
+  title          String
+  expectedResult String?
+  ownerId        String?
+  status         MilestoneStatus @default(PENDING)
+  proof          Json            @default("[]") // [{type:"link"|"note"|"file", value, by, at}]
+  dueAt          DateTime?
+  activatedAt    DateTime?
+  doneAt         DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  instruction Instruction @relation(fields: [instructionId], references: [id], onDelete: Cascade)
+  owner       User?       @relation("MilestoneOwner", fields: [ownerId], references: [id])
+
+  @@index([tenantId])
+  @@index([instructionId])
+  @@index([tenantId, ownerId, status])
+}
+
+/// A cached AI synthesis over the stream of instructions: groups, contradictions,
+/// orphans (instructions tied to no objective), and goal mapping — the upward
+/// strategic-coherence engine for the scattered owner.
+model StrategySynthesis {
+  id          String   @id @default(cuid())
+  tenantId    String
+  createdById String
+  result      Json     @default("{}") // { groups, contradictions, orphans, goalMap }
+  createdAt   DateTime @default(now())
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User   @relation("SynthesisCreator", fields: [createdById], references: [id])
 
   @@index([tenantId])
   @@index([tenantId, createdAt])

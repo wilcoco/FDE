@@ -4,14 +4,20 @@ import { logoutAction } from "@/app/actions/auth";
 import { prisma } from "@/lib/db";
 
 const NAV = [
-  { href: "/dashboard", label: "대시보드" },
+  { href: "/capture", label: "＋ 지시하기" },
+  { href: "/instructions", label: "지시 목록" },
+  { href: "/strategy", label: "전략 통일성" },
   { href: "/inbox", label: "받은 업무·결재" },
-  { href: "/processes", label: "프로세스" },
-  { href: "/instances", label: "실행 현황" },
+  { href: "/dashboard", label: "대시보드" },
   { href: "/objectives", label: "목표 (OKR·KPI)" },
   { href: "/analytics", label: "분석" },
   { href: "/org", label: "조직도" },
   { href: "/members", label: "멤버" },
+];
+
+const NAV_ADVANCED = [
+  { href: "/processes", label: "프로세스 템플릿" },
+  { href: "/instances", label: "프로세스 실행" },
 ];
 
 export default async function AppLayout({
@@ -45,6 +51,14 @@ export default async function AppLayout({
               )}
             </Link>
           ))}
+          <div className="mt-3 border-t border-gray-100 pt-3">
+            <div className="px-3 pb-1 text-[10px] font-semibold uppercase text-gray-400">고급 (프로세스 설계)</div>
+            {NAV_ADVANCED.map((n) => (
+              <Link key={n.href} href={n.href} className="block rounded-md px-3 py-2 text-sm text-gray-500 hover:bg-gray-100">
+                {n.label}
+              </Link>
+            ))}
+          </div>
         </nav>
         <div className="mt-8 border-t border-gray-100 pt-4">
           <div className="text-sm font-medium text-gray-800">{user.name}</div>

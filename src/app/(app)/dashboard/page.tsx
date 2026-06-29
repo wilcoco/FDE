@@ -5,18 +5,20 @@ import { prisma } from "@/lib/db";
 export default async function Dashboard() {
   const { tenant, user } = await requireContext();
 
-  const [myTasks, myApprovalSteps, running, activeDefs, openDirectives] = await Promise.all([
-    prisma.nodeInstance.count({
-      where: { tenantId: tenant.id, assigneeId: user.id, status: "ACTIVE", type: "TASK" },
+  const [activeInstructions, myMilestones, myApprovalSteps, recent] = await Promise.all([
+    prisma.instruction.count({ where: { tenantId: tenant.id, status: "ACTIVE" } }),
+    prisma.milestone.count({
+      where: { tenantId: tenant.id, ownerId: user.id, status: { in: ["ACTIVE", "BLOCKED"] }, instruction: { status: "ACTIVE" } },
     }),
     prisma.approvalStep.findMany({
       where: { tenantId: tenant.id, approverId: user.id, status: "PENDING" },
       include: { request: true },
     }),
-    prisma.processInstance.count({ where: { tenantId: tenant.id, status: "RUNNING" } }),
-    prisma.processDefinition.count({ where: { tenantId: tenant.id, status: "ACTIVE" } }),
-    prisma.directive.count({
-      where: { tenantId: tenant.id, status: "OPEN", nodeInstance: { assigneeId: user.id } },
+    prisma.instruction.findMany({
+      where: { tenantId: tenant.id, status: "ACTIVE" },
+      include: { milestones: true },
+      orderBy: { createdAt: "desc" },
+      take: 5,
     }),
   ]);
 
@@ -25,20 +27,25 @@ export default async function Dashboard() {
   ).length;
 
   const stats = [
-    { label: "내 작업", value: myTasks, href: "/inbox" },
+    { label: "진행 중 지시", value: activeInstructions, href: "/instructions" },
+    { label: "내 꼭지", value: myMilestones, href: "/inbox" },
     { label: "내 결재 대기", value: myApprovals, href: "/inbox" },
-    { label: "진행 중 프로세스", value: running, href: "/instances" },
-    { label: "활성 템플릿", value: activeDefs, href: "/processes" },
   ];
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold">안녕하세요, {user.name}님</h1>
-        <p className="mt-1 text-gray-500">오늘 처리할 업무와 결재를 확인하세요.</p>
+        <p className="mt-1 text-gray-500">말 한마디면 조직이 움직입니다. 지시하고, 흐르는지 확인하세요.</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      {/* primary CTA */}
+      <Link href="/capture" className="block rounded-xl bg-indigo-600 p-6 text-white transition hover:bg-indigo-700">
+        <div className="text-lg font-semibold">＋ 지시하기</div>
+        <div className="mt-1 text-sm text-indigo-100">말하거나 적으면 AI가 굵직한 꼭지로 나눠 실행·추적합니다.</div>
+      </Link>
+
+      <div className="grid grid-cols-3 gap-4">
         {stats.map((s) => (
           <Link key={s.label} href={s.href} className="card transition hover:shadow-md">
             <div className="text-sm text-gray-500">{s.label}</div>
@@ -47,27 +54,37 @@ export default async function Dashboard() {
         ))}
       </div>
 
-      {openDirectives > 0 && (
-        <div className="card border-amber-200 bg-amber-50">
-          <p className="text-sm text-amber-800">
-            재작업이 필요한 업무 지시가 <b>{openDirectives}건</b> 있습니다.{" "}
-            <Link href="/inbox" className="font-medium underline">받은 업무 보기</Link>
-          </p>
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="font-semibold">최근 지시</h2>
+          <Link href="/instructions" className="text-sm text-indigo-600 hover:underline">전체 보기</Link>
         </div>
-      )}
+        <div className="space-y-2">
+          {recent.length === 0 && (
+            <div className="card text-sm text-gray-400">아직 지시가 없습니다. 위 “지시하기”로 시작하세요.</div>
+          )}
+          {recent.map((inst) => {
+            const total = inst.milestones.length;
+            const done = inst.milestones.filter((m) => m.status === "DONE").length;
+            const pct = total ? Math.round((done / total) * 100) : 0;
+            return (
+              <Link key={inst.id} href={`/instructions/${inst.id}`} className="card flex items-center justify-between transition hover:shadow-md">
+                <span className="font-medium">{inst.summary || inst.rawText.slice(0, 50)}</span>
+                <span className="text-sm text-gray-500">{done}/{total} · {pct}%</span>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Link href="/processes/new" className="card transition hover:shadow-md">
-          <h3 className="font-semibold">＋ 새 프로세스 만들기</h3>
-          <p className="mt-2 text-sm text-gray-500">업무 매뉴얼을 자연어로 적으면 순서도가 됩니다.</p>
+      <div className="grid gap-4 md:grid-cols-2">
+        <Link href="/strategy" className="card transition hover:shadow-md">
+          <h3 className="font-semibold">🧭 전략 통일성</h3>
+          <p className="mt-2 text-sm text-gray-500">흩어진 지시들의 일관성·모순을 AI가 해석합니다.</p>
         </Link>
         <Link href="/objectives" className="card transition hover:shadow-md">
-          <h3 className="font-semibold">🎯 목표 관리</h3>
-          <p className="mt-2 text-sm text-gray-500">OKR/KPI를 정의하고 프로세스와 연결하세요.</p>
-        </Link>
-        <Link href="/analytics" className="card transition hover:shadow-md">
-          <h3 className="font-semibold">📊 업무 분석</h3>
-          <p className="mt-2 text-sm text-gray-500">병목·사이클타임·재작업률을 확인하세요.</p>
+          <h3 className="font-semibold">🎯 목표 (OKR·KPI)</h3>
+          <p className="mt-2 text-sm text-gray-500">지시를 전략 목표에 연결하세요.</p>
         </Link>
       </div>
     </div>
