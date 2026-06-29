@@ -63,7 +63,7 @@
 |---|---|---|---|---|
 | D1 | 스택 | Next.js 15 App Router + TS + Prisma + PostgreSQL | NestJS+React 분리 | 단일 코드베이스, 빠른 MVP, 멀티테넌시 용이 |
 | D2 | 인증 | 자체 JWT(httpOnly 쿠키)+bcrypt | NextAuth | 멀티테넌트 신원(테넌트별 email) 제어가 직접 구현이 단순 |
-| D3 | 스타일 | Tailwind CSS v4 | 순수 CSS | 빠르고 일관된 UI |
+| D3 | 스타일 | Tailwind CSS **v3**(순수 JS) | v4 | v4의 네이티브 바이너리(@tailwindcss/oxide)가 Railway 빌드서 npm optional-deps 버그로 실패 → 네이티브 의존성 없는 v3로 전환(동일 UI, 배포 안정) |
 | D4 | 결재자 해석 | 조직도에서 런타임 해석(상사 체인/전결 금액티어) | 정적 저장 | 인사이동에 강함 |
 | D5 | 인스턴스 그래프 | 인스턴스가 자체 노드/엣지 보유(템플릿 복제) | 정의 그래프 직접 참조 | 사후 수정(협조업무 삽입) 위해 인스턴스 독립 필요 |
 | D6 | 그래프 에디터 | 폼 기반 노드/엣지 편집 + 자동배치 SVG 순서도 뷰 | 풀 드래그앤드롭 | MVP 안정성. 드래그앤드롭은 후속 |
