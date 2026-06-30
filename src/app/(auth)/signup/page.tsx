@@ -14,6 +14,9 @@ export default function SignupPage() {
       <div className="card">
         <h1 className="text-lg font-semibold">회사 시작하기</h1>
         <p className="mt-1 text-sm text-gray-500">새 회사(그룹) 계정과 대표 관리자를 만듭니다.</p>
+        <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          이미 회사가 있고 <b>초대받으셨나요?</b> 이 화면이 아니라 관리자가 보낸 <b>초대 링크</b>로 가입하세요. (여기서는 새 회사가 만들어집니다)
+        </p>
         <form action={action} className="mt-5 space-y-4">
           <div>
             <label className="label">회사명</label>
