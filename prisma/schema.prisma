@@ -164,6 +164,8 @@ model Tenant {
   isolationMode IsolationMode @default(SHARED)
   /// if true, only org-chart superiors may issue work directives
   directiveRestrictedToSuperior Boolean @default(false)
+  /// reusable company join link code; null = disabled (members join via this)
+  joinCode      String?       @unique
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 

@@ -1,7 +1,7 @@
 import { requireContext } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { can } from "@/lib/rbac";
-import { addMember, setMemberStatus, setMemberRole } from "@/app/actions/members";
+import { addMember, setMemberStatus, setMemberRole, setJoinLink, disableJoinLink } from "@/app/actions/members";
 import { createInvitation, revokeInvitation } from "@/app/actions/invitations";
 
 export default async function MembersPage() {
@@ -29,7 +29,23 @@ export default async function MembersPage() {
       {admin && (
         <div className="card space-y-4">
           <div>
-            <h2 className="mb-2 text-sm font-semibold text-gray-700">초대 링크 생성</h2>
+            <h2 className="mb-2 text-sm font-semibold text-gray-700">회사 공용 가입 링크</h2>
+            {tenant.joinCode ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <input readOnly value={`${baseUrl}/join/${tenant.joinCode}`} className="input flex-1 bg-white font-mono text-xs" />
+                <form action={setJoinLink}><button className="btn-ghost text-xs">재발급</button></form>
+                <form action={disableJoinLink}><button className="text-xs text-gray-400 hover:text-red-600">끄기</button></form>
+              </div>
+            ) : (
+              <form action={setJoinLink}><button className="btn-ghost text-sm">가입 링크 켜기</button></form>
+            )}
+            <p className="mt-1 text-xs text-gray-400">
+              이 링크를 단톡방 등에 공유하면 누구나 MEMBER로 가입합니다. 유출 시 “재발급”으로 무효화하세요.
+            </p>
+          </div>
+
+          <div className="border-t border-gray-100 pt-4">
+            <h2 className="mb-2 text-sm font-semibold text-gray-700">개별 초대 링크</h2>
             <form action={createInvitation} className="grid gap-2 md:grid-cols-4">
               <input name="email" type="email" placeholder="초대할 이메일" className="input md:col-span-2" required />
               <select name="role" className="input">

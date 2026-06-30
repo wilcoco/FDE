@@ -57,6 +57,41 @@ export async function revokeInvitation(formData: FormData) {
 }
 
 /** Public: invitee accepts via token, sets name + password, and is logged in. */
+/** Public: anyone with the company's reusable join link self-registers (MEMBER). */
+export async function joinByCodeAction(
+  _prev: FormState,
+  formData: FormData,
+): Promise<FormState> {
+  const code = String(formData.get("code") ?? "");
+  const name = String(formData.get("name") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const password = String(formData.get("password") ?? "");
+  if (!name || !email || password.length < 6) {
+    return { error: "이름·이메일·비밀번호(6자 이상)를 입력하세요." };
+  }
+  const tenant = await prisma.tenant.findUnique({ where: { joinCode: code } });
+  if (!tenant) return { error: "유효하지 않거나 비활성화된 가입 링크입니다." };
+
+  const dup = await prisma.user.findFirst({ where: { tenantId: tenant.id, email } });
+  if (dup) return { error: "이미 가입된 이메일입니다. 로그인하세요." };
+
+  const user = await prisma.user.create({
+    data: {
+      tenantId: tenant.id,
+      email,
+      name,
+      role: "MEMBER",
+      status: "ACTIVE",
+      passwordHash: await hashPassword(password),
+    },
+  });
+  await prisma.auditLog.create({
+    data: { tenantId: tenant.id, actorId: user.id, action: "JOINED_VIA_LINK", target: user.id },
+  });
+  await startSession({ userId: user.id, tenantId: tenant.id, role: user.role });
+  redirect("/dashboard");
+}
+
 export async function acceptInvitation(
   _prev: FormState,
   formData: FormData,

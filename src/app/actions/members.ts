@@ -1,10 +1,25 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { requireRole } from "@/lib/session";
 import { hashPassword } from "@/lib/auth";
 import type { Role } from "@prisma/client";
+
+/** Enable or regenerate the reusable company join link. */
+export async function setJoinLink() {
+  const { tenant } = await requireRole("ADMIN");
+  await prisma.tenant.update({ where: { id: tenant.id }, data: { joinCode: randomUUID() } });
+  revalidatePath("/members");
+}
+
+/** Disable the company join link. */
+export async function disableJoinLink() {
+  const { tenant } = await requireRole("ADMIN");
+  await prisma.tenant.update({ where: { id: tenant.id }, data: { joinCode: null } });
+  revalidatePath("/members");
+}
 
 export async function addMember(formData: FormData) {
   const { tenant } = await requireRole("ADMIN");
