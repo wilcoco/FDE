@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requireContext } from "@/lib/session";
-import { generateMilestones, synthesizeStrategy } from "@/lib/ai";
+import { generateMilestones, regenerateMilestones, synthesizeStrategy } from "@/lib/ai";
 import { notify } from "@/lib/notify";
 import type { MilestoneStatus, Prisma } from "@prisma/client";
 
@@ -33,8 +33,8 @@ export async function captureInstruction(formData: FormData) {
         order: i,
         title: m.title,
         expectedResult: m.expectedResult || null,
-        status: (i === 0 ? "ACTIVE" : "PENDING") as MilestoneStatus,
-        activatedAt: i === 0 ? new Date() : null,
+        status: "PENDING" as MilestoneStatus,
+        activatedAt: null,
         proof: [] as Prisma.InputJsonValue,
       })),
     });
@@ -45,6 +45,47 @@ export async function captureInstruction(formData: FormData) {
   });
 
   redirect(`/instructions/${instruction.id}`);
+}
+
+/** Re-generate the milestone set from additional owner guidance (refine loop). */
+export async function regenerateInstruction(formData: FormData) {
+  const { tenant } = await requireContext();
+  const instructionId = String(formData.get("instructionId") ?? "");
+  const feedback = String(formData.get("feedback") ?? "").trim();
+  if (!feedback) return;
+
+  const inst = await prisma.instruction.findFirst({
+    where: { id: instructionId, tenantId: tenant.id },
+    include: { milestones: { orderBy: { order: "asc" } } },
+  });
+  if (!inst) return;
+
+  const gen = await regenerateMilestones(
+    inst.rawText,
+    inst.milestones.map((m) => m.title),
+    feedback,
+  );
+
+  await prisma.$transaction(async (tx) => {
+    await tx.milestone.deleteMany({ where: { instructionId, tenantId: tenant.id } });
+    await tx.milestone.createMany({
+      data: gen.milestones.map((m, i) => ({
+        tenantId: tenant.id,
+        instructionId,
+        order: i,
+        title: m.title,
+        expectedResult: m.expectedResult || null,
+        status: "PENDING" as MilestoneStatus,
+        activatedAt: null,
+        proof: [] as Prisma.InputJsonValue,
+      })),
+    });
+    await tx.instruction.update({
+      where: { id: instructionId },
+      data: { summary: gen.summary, rawText: `${inst.rawText}\n\n[추가 지침] ${feedback}` },
+    });
+  });
+  revalidatePath(`/instructions/${instructionId}`);
 }
 
 async function ownMilestone(tenantId: string, milestoneId: string) {

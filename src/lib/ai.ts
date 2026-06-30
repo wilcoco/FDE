@@ -40,6 +40,10 @@ export interface GenProcess {
 }
 
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-4-8";
+// Latency-sensitive structured tasks (milestone decomposition, synthesis) use a
+// fast model by default — these are simple enough that Haiku is plenty, and
+// speed matters for the capture UX. Override with ANTHROPIC_FAST_MODEL.
+const FAST_MODEL = process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
 
 const SYSTEM = `당신은 업무 프로세스 설계 도우미입니다. 사용자가 자연어로 적은 업무 매뉴얼을 실행 가능한 프로세스 그래프(노드+엣지)로 변환합니다.
 
@@ -207,7 +211,7 @@ export async function generateMilestones(instruction: string): Promise<GenMilest
     const client = new Anthropic();
     const res = await Promise.race([
       client.messages.create({
-        model: MODEL,
+        model: FAST_MODEL,
         max_tokens: 2000,
         system: MILESTONE_SYSTEM,
         tools: [MILESTONE_TOOL],
@@ -226,6 +230,44 @@ export async function generateMilestones(instruction: string): Promise<GenMilest
   } catch (e) {
     console.error("milestone generation failed, heuristic fallback:", e);
     return heuristicMilestones(instruction);
+  }
+}
+
+/** Re-decompose with the owner's additional guidance (refine loop). */
+export async function regenerateMilestones(
+  instruction: string,
+  currentTitles: string[],
+  feedback: string,
+): Promise<GenMilestones> {
+  const combined = `${instruction}\n\n[추가 지침] ${feedback}`;
+  if (!process.env.ANTHROPIC_API_KEY) return heuristicMilestones(combined);
+  try {
+    const client = new Anthropic();
+    const userMsg =
+      `원래 지시:\n${instruction}\n\n` +
+      `현재 꼭지:\n${currentTitles.map((t, i) => `${i + 1}. ${t}`).join("\n")}\n\n` +
+      `대표의 추가 지침(이 방향으로 다시 만드세요):\n${feedback}`;
+    const res = await Promise.race([
+      client.messages.create({
+        model: FAST_MODEL,
+        max_tokens: 2000,
+        system: MILESTONE_SYSTEM,
+        tools: [MILESTONE_TOOL],
+        tool_choice: { type: "tool", name: "emit_milestones" },
+        messages: [{ role: "user", content: userMsg }],
+      }),
+      aiTimeout(45000),
+    ]);
+    if (!res) return heuristicMilestones(combined);
+    const block = res.content.find((b) => b.type === "tool_use");
+    if (block && block.type === "tool_use") {
+      const out = block.input as GenMilestones;
+      if (out.milestones?.length) return out;
+    }
+    return heuristicMilestones(combined);
+  } catch (e) {
+    console.error("milestone regeneration failed, heuristic fallback:", e);
+    return heuristicMilestones(combined);
   }
 }
 
@@ -327,7 +369,7 @@ export async function synthesizeStrategy(
     };
     const res = await Promise.race([
       client.messages.create({
-        model: MODEL,
+        model: FAST_MODEL,
         max_tokens: 3000,
         system: SYNTH_SYSTEM,
         tools: [SYNTH_TOOL],

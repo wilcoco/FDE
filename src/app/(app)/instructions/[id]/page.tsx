@@ -6,7 +6,9 @@ import { MilestoneFlow, MilestoneBoard, type MilestoneCard } from "@/components/
 import {
   updateMilestone, assignMilestoneOwner, setMilestoneStatus, addMilestoneProof,
   addMilestone, deleteMilestone, linkInstructionObjective, archiveInstruction,
+  regenerateInstruction,
 } from "@/app/actions/capture";
+import SubmitButton from "@/components/SubmitButton";
 
 interface ProofItem { type: string; value: string; by: string; at: string }
 
@@ -65,6 +67,25 @@ export default async function InstructionDetail({ params }: { params: Promise<{ 
         <h2 className="mb-3 font-semibold">상태 보드</h2>
         <MilestoneBoard milestones={cards} />
       </div>
+
+      {/* refine: re-guide the AI to regenerate milestones */}
+      <details className="card border-indigo-200 bg-indigo-50/40">
+        <summary className="cursor-pointer font-semibold text-indigo-800">🔁 AI에게 다시 지침 (꼭지 재생성)</summary>
+        <p className="mt-2 text-sm text-gray-500">
+          꼭지 구성이 맘에 안 들면, 어떻게 바꿀지 말로 지침을 주세요. AI가 추가 지침을 반영해 꼭지를
+          <b> 새로 만듭니다</b> (기존 꼭지·담당자·증명은 대체됩니다).
+        </p>
+        <form action={regenerateInstruction} className="mt-3 space-y-2">
+          <input type="hidden" name="instructionId" value={inst.id} />
+          <textarea
+            name="feedback"
+            className="input min-h-24"
+            placeholder="예: 마케팅을 둘로 나눠 — 온라인 광고와 오프라인 행사로. 그리고 법무 검토 단계를 맨 앞에 추가해."
+            required
+          />
+          <SubmitButton pendingText="AI가 다시 만드는 중…">다시 만들기</SubmitButton>
+        </form>
+      </details>
 
       {/* milestone management */}
       <div className="space-y-3">
