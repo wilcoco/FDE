@@ -196,18 +196,27 @@ const MILESTONE_TOOL = {
   },
 };
 
+/** Resolve to null after `ms` so a slow AI call falls back instead of hanging. */
+function aiTimeout(ms: number): Promise<null> {
+  return new Promise((resolve) => setTimeout(() => resolve(null), ms));
+}
+
 export async function generateMilestones(instruction: string): Promise<GenMilestones> {
   if (!process.env.ANTHROPIC_API_KEY) return heuristicMilestones(instruction);
   try {
     const client = new Anthropic();
-    const res = await client.messages.create({
-      model: MODEL,
-      max_tokens: 2000,
-      system: MILESTONE_SYSTEM,
-      tools: [MILESTONE_TOOL],
-      tool_choice: { type: "tool", name: "emit_milestones" },
-      messages: [{ role: "user", content: `다음 대표 지시를 꼭지로 분해하세요:\n\n${instruction}` }],
-    });
+    const res = await Promise.race([
+      client.messages.create({
+        model: MODEL,
+        max_tokens: 2000,
+        system: MILESTONE_SYSTEM,
+        tools: [MILESTONE_TOOL],
+        tool_choice: { type: "tool", name: "emit_milestones" },
+        messages: [{ role: "user", content: `다음 대표 지시를 꼭지로 분해하세요:\n\n${instruction}` }],
+      }),
+      aiTimeout(45000),
+    ]);
+    if (!res) return heuristicMilestones(instruction);
     const block = res.content.find((b) => b.type === "tool_use");
     if (block && block.type === "tool_use") {
       const out = block.input as GenMilestones;
@@ -316,14 +325,18 @@ export async function synthesizeStrategy(
       instructions: instructions.map((i) => ({ id: i.id, text: i.text.slice(0, 300) })),
       objectives,
     };
-    const res = await client.messages.create({
-      model: MODEL,
-      max_tokens: 3000,
-      system: SYNTH_SYSTEM,
-      tools: [SYNTH_TOOL],
-      tool_choice: { type: "tool", name: "emit_synthesis" },
-      messages: [{ role: "user", content: `지시들과 목표:\n\n${JSON.stringify(payload, null, 2)}` }],
-    });
+    const res = await Promise.race([
+      client.messages.create({
+        model: MODEL,
+        max_tokens: 3000,
+        system: SYNTH_SYSTEM,
+        tools: [SYNTH_TOOL],
+        tool_choice: { type: "tool", name: "emit_synthesis" },
+        messages: [{ role: "user", content: `지시들과 목표:\n\n${JSON.stringify(payload, null, 2)}` }],
+      }),
+      aiTimeout(45000),
+    ]);
+    if (!res) return heuristicSynthesis(instructions);
     const block = res.content.find((b) => b.type === "tool_use");
     if (block && block.type === "tool_use") return block.input as StrategyResult;
     return heuristicSynthesis(instructions);
