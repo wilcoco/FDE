@@ -250,6 +250,7 @@ model User {
   ownedMilestones      Milestone[]         @relation("MilestoneOwner")
   createdSyntheses     StrategySynthesis[] @relation("SynthesisCreator")
   decidedJoinRequests  JoinRequest[]       @relation("JoinRequestDecider")
+  resetTokens          PasswordResetToken[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -704,6 +705,21 @@ model JoinRequest {
   decidedBy User?  @relation("JoinRequestDecider", fields: [decidedById], references: [id])
 
   @@index([tenantId, status])
+}
+
+/// One-time token emailed to a user to reset a forgotten password.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tenantId  String
+  userId    String
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model AuditLog {

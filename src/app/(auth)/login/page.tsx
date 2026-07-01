@@ -27,6 +27,11 @@ export default async function LoginPage({
         <div className="mt-5 space-y-4">
           <SocialButtons />
           <LoginForm />
+          <p className="text-center text-sm">
+            <Link href="/forgot" className="text-gray-500 hover:text-indigo-600">
+              비밀번호를 잊으셨나요?
+            </Link>
+          </p>
         </div>
       </div>
       <p className="mt-4 text-center text-sm text-gray-500">
