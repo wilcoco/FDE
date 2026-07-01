@@ -36,8 +36,8 @@ export default async function AnalyticsPage() {
         </div>
       )}
 
-      <div className="card overflow-hidden p-0">
-        <table className="w-full">
+      <div className="card overflow-x-auto p-0">
+        <table className="w-full min-w-[560px]">
           <thead className="border-b border-gray-200 bg-gray-50">
             <tr>
               <th className="th">노드</th><th className="th">처리 건수</th>

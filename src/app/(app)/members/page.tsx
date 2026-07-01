@@ -137,8 +137,8 @@ export default async function MembersPage() {
         </div>
       )}
 
-      <div className="card overflow-hidden p-0">
-        <table className="w-full">
+      <div className="card overflow-x-auto p-0">
+        <table className="w-full min-w-[560px]">
           <thead className="border-b border-gray-200 bg-gray-50">
             <tr>
               <th className="th">이름</th><th className="th">이메일</th><th className="th">부서/직급</th>

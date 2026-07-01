@@ -28,8 +28,8 @@ export default async function InstancesPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">실행 현황</h1>
-      <div className="card overflow-hidden p-0">
-        <table className="w-full">
+      <div className="card overflow-x-auto p-0">
+        <table className="w-full min-w-[560px]">
           <thead className="border-b border-gray-200 bg-gray-50">
             <tr>
               <th className="th">제목</th>
