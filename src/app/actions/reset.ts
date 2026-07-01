@@ -22,32 +22,43 @@ export async function requestPasswordReset(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  const slug = String(formData.get("slug") ?? "").trim().toLowerCase();
+  const company = String(formData.get("slug") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
-  if (!slug || !email) return { error: "회사 식별자와 이메일을 입력하세요." };
+  if (!email) return { error: "이메일을 입력하세요." };
 
-  const tenant = await prisma.tenant.findUnique({ where: { slug } });
-  if (tenant) {
-    const user = await prisma.user.findFirst({
-      where: { tenantId: tenant.id, email, status: { not: "DISABLED" } },
+  // Company is optional; reset every active account with this email (usually one).
+  let where;
+  if (company) {
+    const tenants = await prisma.tenant.findMany({
+      where: {
+        OR: [
+          { slug: company.toLowerCase() },
+          { name: { equals: company, mode: "insensitive" } },
+        ],
+      },
+      select: { id: true },
     });
-    if (user) {
-      // invalidate any outstanding tokens, then issue a fresh one
-      await prisma.passwordResetToken.updateMany({
-        where: { userId: user.id, usedAt: null },
-        data: { usedAt: new Date() },
-      });
-      const token = randomUUID() + randomUUID().replace(/-/g, "");
-      await prisma.passwordResetToken.create({
-        data: {
-          tenantId: tenant.id,
-          userId: user.id,
-          token,
-          expiresAt: new Date(Date.now() + RESET_TTL_MS),
-        },
-      });
-      await sendPasswordResetEmail(user.email, user.name, token);
-    }
+    where = { email, status: { not: "DISABLED" as const }, tenantId: { in: tenants.map((t) => t.id) } };
+  } else {
+    where = { email, status: { not: "DISABLED" as const } };
+  }
+
+  const users = await prisma.user.findMany({ where });
+  for (const user of users) {
+    await prisma.passwordResetToken.updateMany({
+      where: { userId: user.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    const token = randomUUID() + randomUUID().replace(/-/g, "");
+    await prisma.passwordResetToken.create({
+      data: {
+        tenantId: user.tenantId,
+        userId: user.id,
+        token,
+        expiresAt: new Date(Date.now() + RESET_TTL_MS),
+      },
+    });
+    await sendPasswordResetEmail(user.email, user.name, token);
   }
 
   return { ok: true };

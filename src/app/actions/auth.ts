@@ -37,26 +37,51 @@ export async function loginAction(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
-  const slug = String(formData.get("slug") ?? "").trim().toLowerCase();
+  const company = String(formData.get("slug") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
+  if (!email || !password) return { error: "이메일과 비밀번호를 입력하세요." };
 
-  const tenant = await prisma.tenant.findUnique({ where: { slug } });
-  if (!tenant) return { error: "회사 식별자 또는 로그인 정보가 올바르지 않습니다." };
-
-  const user = await prisma.user.findFirst({
-    where: { tenantId: tenant.id, email },
-  });
-  if (
-    !user ||
-    user.status === "DISABLED" ||
-    !user.passwordHash ||
-    !(await verifyPassword(password, user.passwordHash))
-  ) {
-    return { error: "회사 식별자 또는 로그인 정보가 올바르지 않습니다." };
+  // Company is OPTIONAL. If given, match by slug OR name (case-insensitive);
+  // otherwise consider every tenant this email belongs to and disambiguate by
+  // the password itself. This removes the "unknown slug" login trap.
+  let candidates;
+  if (company) {
+    const tenants = await prisma.tenant.findMany({
+      where: {
+        OR: [
+          { slug: company.toLowerCase() },
+          { name: { equals: company, mode: "insensitive" } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (tenants.length === 0) {
+      return { error: "해당 회사를 찾을 수 없습니다. 회사명 없이 이메일만으로도 로그인할 수 있어요." };
+    }
+    candidates = await prisma.user.findMany({
+      where: { email, tenantId: { in: tenants.map((t) => t.id) } },
+    });
+  } else {
+    candidates = await prisma.user.findMany({ where: { email } });
   }
 
-  await startSession({ userId: user.id, tenantId: tenant.id, role: user.role });
+  // keep only accounts that can log in and whose password matches
+  const matches = [];
+  for (const u of candidates) {
+    if (u.status === "DISABLED" || !u.passwordHash) continue;
+    if (await verifyPassword(password, u.passwordHash)) matches.push(u);
+  }
+
+  if (matches.length === 0) {
+    return { error: "이메일 또는 비밀번호가 올바르지 않습니다." };
+  }
+  if (matches.length > 1) {
+    return { error: "이 이메일이 여러 회사에 있습니다. 회사명(또는 식별자)을 함께 입력해 주세요." };
+  }
+
+  const user = matches[0];
+  await startSession({ userId: user.id, tenantId: user.tenantId, role: user.role });
   redirect("/dashboard");
 }
 
