@@ -12,7 +12,7 @@ export default async function Landing() {
         <div className="text-xl font-bold text-indigo-600">FlowDesk</div>
         <nav className="flex gap-3">
           <Link href="/login" className="btn-ghost">로그인</Link>
-          <Link href="/signup" className="btn">회사 시작하기</Link>
+          <Link href="/signup" className="btn">회원가입</Link>
         </nav>
       </header>
 
@@ -27,7 +27,7 @@ export default async function Landing() {
           전자결재로 승인받고, 실제 업무가 그 흐름을 따라 진행되는지 추적하세요.
         </p>
         <div className="mt-8 flex justify-center gap-3">
-          <Link href="/signup" className="btn px-5 py-3 text-base">무료로 시작</Link>
+          <Link href="/signup" className="btn px-5 py-3 text-base">회원가입 · 무료로 시작</Link>
           <Link href="/login" className="btn-ghost px-5 py-3 text-base">로그인</Link>
         </div>
       </section>

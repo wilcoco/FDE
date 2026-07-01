@@ -35,7 +35,7 @@ export default async function LoginPage({
         </div>
       </div>
       <p className="mt-4 text-center text-sm text-gray-500">
-        회사가 없나요? <Link href="/signup" className="text-indigo-600">회사 시작하기</Link>
+        계정이 없나요? <Link href="/signup" className="text-indigo-600">회원가입</Link>
       </p>
     </main>
   );
