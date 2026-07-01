@@ -6,6 +6,7 @@ import {
   verifySessionToken,
   type SessionPayload,
 } from "./auth";
+import { atLeast } from "./rbac";
 import type { Role, Tenant, User } from "@prisma/client";
 
 const COOKIE_NAME = "fd_session";
@@ -67,7 +68,9 @@ export async function requireContext(): Promise<AuthContext> {
 /** Require the current user to hold at least one of the given roles. */
 export async function requireRole(...roles: Role[]): Promise<AuthContext> {
   const ctx = await requireContext();
-  if (!roles.includes(ctx.user.role)) {
+  // Role is hierarchical: a higher role satisfies a lower requirement.
+  // requireRole("ADMIN") therefore also admits OWNER.
+  if (!roles.some((min) => atLeast(ctx.user.role, min))) {
     redirect("/dashboard?error=forbidden");
   }
   return ctx;

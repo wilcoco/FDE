@@ -21,26 +21,29 @@ export default async function MembersPage() {
       orderBy: { createdAt: "desc" },
     }),
     prisma.joinRequest.findMany({
-      where: { tenantId: tenant.id, status: "PENDING" },
+      where: { tenantId: tenant.id },
       orderBy: { createdAt: "desc" },
+      take: 30,
     }),
   ]);
+  const pendingRequests = joinRequests.filter((r) => r.status === "PENDING");
+  const processedRequests = joinRequests.filter((r) => r.status !== "PENDING").slice(0, 8);
   const baseUrl = process.env.APP_URL ?? "";
 
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">멤버</h1>
 
-      {admin && joinRequests.length > 0 && (
+      {admin && pendingRequests.length > 0 && (
         <div className="card space-y-3 border-indigo-200 bg-indigo-50/40">
           <h2 className="text-sm font-semibold text-indigo-800">
-            가입 요청 대기 ({joinRequests.length})
+            가입 요청 대기 ({pendingRequests.length})
           </h2>
           <p className="text-xs text-gray-500">
             아래 사람들이 이 회사에 가입을 요청했습니다. 승인하면 바로 구성원이 됩니다.
           </p>
           <div className="space-y-2">
-            {joinRequests.map((r) => (
+            {pendingRequests.map((r) => (
               <div
                 key={r.id}
                 className="flex flex-wrap items-center gap-2 rounded-md border border-indigo-100 bg-white p-2 text-sm"
@@ -58,6 +61,32 @@ export default async function MembersPage() {
                     <button className="text-xs text-gray-400 hover:text-red-600">거절</button>
                   </form>
                 </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {admin && processedRequests.length > 0 && (
+        <div className="card space-y-2">
+          <h2 className="text-sm font-semibold text-gray-700">최근 처리된 가입 요청</h2>
+          <div className="space-y-1">
+            {processedRequests.map((r) => (
+              <div key={r.id} className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="font-medium">{r.name}</span>
+                <span className="text-gray-400">{r.email}</span>
+                <span className="text-xs text-gray-400">
+                  {r.decidedAt?.toLocaleDateString() ?? ""}
+                </span>
+                <span
+                  className={`badge ml-auto ${
+                    r.status === "APPROVED"
+                      ? "bg-green-100 text-green-700"
+                      : "bg-gray-100 text-gray-500"
+                  }`}
+                >
+                  {r.status === "APPROVED" ? "승인됨" : "거절됨"}
+                </span>
               </div>
             ))}
           </div>
