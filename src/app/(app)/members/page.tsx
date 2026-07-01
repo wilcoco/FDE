@@ -3,12 +3,13 @@ import { prisma } from "@/lib/db";
 import { can } from "@/lib/rbac";
 import { addMember, setMemberStatus, setMemberRole, setJoinLink, disableJoinLink } from "@/app/actions/members";
 import { createInvitation, revokeInvitation } from "@/app/actions/invitations";
+import { approveJoinRequest, rejectJoinRequest } from "@/app/actions/join-requests";
 
 export default async function MembersPage() {
   const { tenant, user } = await requireContext();
   const admin = can.manageMembers(user.role);
   const owner = can.manageTenant(user.role);
-  const [members, invitations] = await Promise.all([
+  const [members, invitations, joinRequests] = await Promise.all([
     prisma.user.findMany({
       where: { tenantId: tenant.id },
       include: { department: true, position: true },
@@ -19,12 +20,49 @@ export default async function MembersPage() {
       include: { invitedBy: true },
       orderBy: { createdAt: "desc" },
     }),
+    prisma.joinRequest.findMany({
+      where: { tenantId: tenant.id, status: "PENDING" },
+      orderBy: { createdAt: "desc" },
+    }),
   ]);
   const baseUrl = process.env.APP_URL ?? "";
 
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">멤버</h1>
+
+      {admin && joinRequests.length > 0 && (
+        <div className="card space-y-3 border-indigo-200 bg-indigo-50/40">
+          <h2 className="text-sm font-semibold text-indigo-800">
+            가입 요청 대기 ({joinRequests.length})
+          </h2>
+          <p className="text-xs text-gray-500">
+            아래 사람들이 이 회사에 가입을 요청했습니다. 승인하면 바로 구성원이 됩니다.
+          </p>
+          <div className="space-y-2">
+            {joinRequests.map((r) => (
+              <div
+                key={r.id}
+                className="flex flex-wrap items-center gap-2 rounded-md border border-indigo-100 bg-white p-2 text-sm"
+              >
+                <span className="font-medium">{r.name}</span>
+                <span className="text-gray-500">{r.email}</span>
+                <span className="text-xs text-gray-400">{r.createdAt.toLocaleDateString()}</span>
+                <div className="ml-auto flex gap-2">
+                  <form action={approveJoinRequest}>
+                    <input type="hidden" name="id" value={r.id} />
+                    <button className="btn px-3 py-1 text-xs">승인</button>
+                  </form>
+                  <form action={rejectJoinRequest}>
+                    <input type="hidden" name="id" value={r.id} />
+                    <button className="text-xs text-gray-400 hover:text-red-600">거절</button>
+                  </form>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {admin && (
         <div className="card space-y-4">

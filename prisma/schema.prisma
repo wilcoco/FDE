@@ -47,6 +47,12 @@ enum UserStatus {
   DISABLED
 }
 
+enum JoinRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum NodeType {
   START
   TASK
@@ -197,6 +203,7 @@ model Tenant {
   instructions   Instruction[]
   milestones     Milestone[]
   syntheses      StrategySynthesis[]
+  joinRequests   JoinRequest[]
 }
 
 model User {
@@ -242,6 +249,7 @@ model User {
   authoredInstructions Instruction[]       @relation("InstructionAuthor")
   ownedMilestones      Milestone[]         @relation("MilestoneOwner")
   createdSyntheses     StrategySynthesis[] @relation("SynthesisCreator")
+  decidedJoinRequests  JoinRequest[]       @relation("JoinRequestDecider")
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -678,6 +686,24 @@ model Notification {
 
   @@index([tenantId])
   @@index([tenantId, userId, readAt])
+}
+
+/// A self-serve request to join an existing company, pending admin approval.
+model JoinRequest {
+  id           String            @id @default(cuid())
+  tenantId     String
+  email        String
+  name         String
+  passwordHash String
+  status       JoinRequestStatus @default(PENDING)
+  createdAt    DateTime          @default(now())
+  decidedAt    DateTime?
+  decidedById  String?
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  decidedBy User?  @relation("JoinRequestDecider", fields: [decidedById], references: [id])
+
+  @@index([tenantId, status])
 }
 
 model AuditLog {
