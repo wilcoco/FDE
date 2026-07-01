@@ -1,0 +1,34 @@
+"use client";
+
+import { useActionState } from "react";
+import { signupAction, type FormState } from "@/app/actions/auth";
+
+const initial: FormState = {};
+
+export default function SignupForm() {
+  const [state, action, pending] = useActionState(signupAction, initial);
+  return (
+    <form action={action} className="space-y-4">
+      <div>
+        <label className="label">회사명</label>
+        <input name="companyName" className="input" placeholder="예: 아크미 주식회사" required />
+      </div>
+      <div>
+        <label className="label">대표 관리자 이름</label>
+        <input name="name" className="input" placeholder="홍길동" required />
+      </div>
+      <div>
+        <label className="label">이메일</label>
+        <input name="email" type="email" className="input" placeholder="admin@acme.com" required />
+      </div>
+      <div>
+        <label className="label">비밀번호</label>
+        <input name="password" type="password" className="input" placeholder="6자 이상" required />
+      </div>
+      {state.error && <p className="text-sm text-red-600">{state.error}</p>}
+      <button className="btn w-full" disabled={pending}>
+        {pending ? "생성 중…" : "회사 만들기"}
+      </button>
+    </form>
+  );
+}

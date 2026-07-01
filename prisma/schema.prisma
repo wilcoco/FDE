@@ -166,6 +166,9 @@ model Tenant {
   directiveRestrictedToSuperior Boolean @default(false)
   /// reusable company join link code; null = disabled (members join via this)
   joinCode      String?       @unique
+  /// org identifiers for social-login auto-join (first member from the org binds it)
+  googleDomain  String?       @unique
+  slackTeamId   String?       @unique
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
@@ -201,12 +204,17 @@ model User {
   tenantId     String
   email        String
   name         String
-  passwordHash String
+  /// null for users who only sign in via a social provider
+  passwordHash String?
   role         Role       @default(MEMBER)
   status       UserStatus @default(ACTIVE)
   departmentId String?
   positionId   String?
   managerId    String?
+  /// social login: "google" | "slack" | "kakao"; null = password login
+  authProvider String?
+  /// stable subject id from the social provider
+  authSub      String?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
@@ -238,6 +246,7 @@ model User {
   @@unique([tenantId, email])
   @@index([tenantId])
   @@index([managerId])
+  @@index([authProvider, authSub])
 }
 
 // ── org chart ───────────────────────────────────────────────────────────────
