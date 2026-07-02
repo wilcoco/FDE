@@ -81,7 +81,14 @@ export default function AppShell({
         <div className="text-sm font-medium text-gray-800">{userName}</div>
         <div className="text-xs text-gray-400">{userEmail}</div>
         <span className="badge mt-2 bg-gray-100 text-gray-600">{userRole}</span>
-        <form action={logoutAction} className="mt-3">
+        <Link
+          href="/settings"
+          onClick={close}
+          className="mt-3 block rounded-md px-3 py-2 text-sm text-gray-600 hover:bg-gray-100"
+        >
+          🔔 알림 설정
+        </Link>
+        <form action={logoutAction} className="mt-2">
           <button className="btn-ghost w-full">로그아웃</button>
         </form>
       </div>

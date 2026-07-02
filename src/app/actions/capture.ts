@@ -5,8 +5,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requireContext } from "@/lib/session";
 import { generateMilestones, regenerateMilestones } from "@/lib/ai";
-import { notify } from "@/lib/notify";
-import { sendNotificationEmail } from "@/lib/mail";
+import { notify, notifyEmail } from "@/lib/notify";
 import { atLeast } from "@/lib/rbac";
 import { resolveStatusChange, canReview } from "@/lib/milestone-rules";
 import { runSynthesisForTenant, maybeAutoSynthesize } from "@/lib/synthesis";
@@ -127,23 +126,14 @@ export async function assignMilestoneOwner(formData: FormData) {
   await prisma.milestone.update({ where: { id }, data: { ownerId } });
 
   if (ownerId && ownerId !== user.id) {
-    const owner = await prisma.user.findFirst({
-      where: { id: ownerId, tenantId: tenant.id, status: "ACTIVE" },
-      select: { email: true },
-    });
-    await notify(prisma, {
+    const entry = {
       tenantId: tenant.id, userId: ownerId, type: "MILESTONE_ASSIGNED",
       title: `꼭지가 배정되었습니다: ${m.title}`,
-      body: m.status === "PENDING" ? "대기 상태 — 순서가 되면 시작됩니다." : undefined,
+      body: m.status === "PENDING" ? "대기 상태 — 순서가 되면 시작됩니다." : m.instruction.summary ?? undefined,
       link: `/instructions/${m.instructionId}`,
-    });
-    if (owner) {
-      void sendNotificationEmail(owner.email, {
-        title: `꼭지가 배정되었습니다: ${m.title}`,
-        body: m.instruction.summary ?? undefined,
-        link: `/instructions/${m.instructionId}`,
-      }).catch(() => {});
-    }
+    };
+    await notify(prisma, entry);
+    void notifyEmail(entry).catch(() => {});
   }
   revalidatePath(`/instructions/${m.instructionId}`);
 }
@@ -216,17 +206,12 @@ export async function setMilestoneStatus(formData: FormData) {
   });
 
   if (change.needsReview && m.instruction.authorId !== user.id && m.status !== "REVIEW") {
-    const author = await prisma.user.findFirst({
-      where: { id: m.instruction.authorId, tenantId: tenant.id, status: "ACTIVE" },
-      select: { email: true },
-    });
-    if (author) {
-      void sendNotificationEmail(author.email, {
-        title: `검수 요청: ${m.title}`,
-        body: `${user.name} 님이 완료를 제출했습니다.`,
-        link: `/instructions/${m.instructionId}`,
-      }).catch(() => {});
-    }
+    void notifyEmail({
+      tenantId: tenant.id, userId: m.instruction.authorId, type: "MILESTONE_REVIEW",
+      title: `검수 요청: ${m.title}`,
+      body: `${user.name} 님이 완료를 제출했습니다.`,
+      link: `/instructions/${m.instructionId}`,
+    }).catch(() => {});
   }
 
   revalidatePath(`/instructions/${m.instructionId}`);
@@ -303,17 +288,12 @@ export async function returnMilestone(formData: FormData) {
   });
 
   if (m.ownerId) {
-    const owner = await prisma.user.findFirst({
-      where: { id: m.ownerId, tenantId: tenant.id, status: "ACTIVE" },
-      select: { email: true },
-    });
-    if (owner) {
-      void sendNotificationEmail(owner.email, {
-        title: `반려됨: ${m.title}`,
-        body: note || "기대 결과와 다릅니다. 보완해 주세요.",
-        link: `/instructions/${m.instructionId}`,
-      }).catch(() => {});
-    }
+    void notifyEmail({
+      tenantId: tenant.id, userId: m.ownerId, type: "MILESTONE_RETURNED",
+      title: `반려됨: ${m.title}`,
+      body: note || "기대 결과와 다릅니다. 보완해 주세요.",
+      link: `/instructions/${m.instructionId}`,
+    }).catch(() => {});
   }
 
   revalidatePath(`/instructions/${m.instructionId}`);
@@ -330,6 +310,18 @@ export async function addMilestoneProof(formData: FormData) {
   const proof = Array.isArray(m.proof) ? (m.proof as unknown[]) : [];
   proof.push({ type, value, by: user.name, at: new Date().toISOString() });
   await prisma.milestone.update({ where: { id }, data: { proof: proof as Prisma.InputJsonValue } });
+
+  // activity feed for the instruction author (opt-out via 알림 설정 > 진행 기록)
+  if (m.instruction.authorId !== user.id) {
+    const entry = {
+      tenantId: tenant.id, userId: m.instruction.authorId, type: "PROOF_ADDED",
+      title: `진행 기록: ${m.title}`,
+      body: `${user.name}: ${value.slice(0, 120)}`,
+      link: `/instructions/${m.instructionId}`,
+    };
+    await notify(prisma, entry);
+    void notifyEmail(entry).catch(() => {});
+  }
   revalidatePath(`/instructions/${m.instructionId}`);
 }
 

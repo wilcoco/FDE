@@ -224,6 +224,8 @@ model User {
   authProvider String?
   /// stable subject id from the social provider
   authSub      String?
+  /// per-category notification channel preferences; {} = defaults (see notify-prefs)
+  notifyPrefs  Json       @default("{}")
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 

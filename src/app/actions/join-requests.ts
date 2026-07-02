@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { requireRole } from "@/lib/session";
 import { hashPassword } from "@/lib/auth";
-import { notify } from "@/lib/notify";
+import { notify, notifyEmail } from "@/lib/notify";
 import { sendNotificationEmail } from "@/lib/mail";
 import { consume, clientIp, retryMinutes } from "@/lib/rate-limit";
 
@@ -44,11 +44,11 @@ async function notifyAdmins(
 ) {
   const admins = await prisma.user.findMany({
     where: { tenantId, status: "ACTIVE", role: { in: ["OWNER", "ADMIN"] } },
-    select: { id: true, email: true },
+    select: { id: true },
   });
   await Promise.all(admins.map((a) => notify(prisma, { tenantId, userId: a.id, ...entry })));
   for (const a of admins) {
-    void sendNotificationEmail(a.email, entry).catch(() => {});
+    void notifyEmail({ tenantId, userId: a.id, ...entry }).catch(() => {});
   }
 }
 

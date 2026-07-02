@@ -4,8 +4,7 @@
 // tenant) and via `npm run jobs:sweep` for a real cron.
 
 import { prisma } from "./db";
-import { notify } from "./notify";
-import { sendNotificationEmail } from "./mail";
+import { notify, notifyEmail } from "./notify";
 import {
   classifyAttention,
   attentionReason,
@@ -49,24 +48,21 @@ export async function sweepTenant(tenantId: string, now = new Date()): Promise<S
 
     const users = await prisma.user.findMany({
       where: { id: { in: recipientIds }, status: "ACTIVE" },
-      select: { id: true, email: true },
+      select: { id: true },
     });
     if (users.length === 0) continue;
 
     for (const u of users) {
-      await notify(prisma, {
+      const entry = {
         tenantId,
         userId: u.id,
         type: "MILESTONE_NUDGE",
         title: `⏰ 꼭지 확인 필요: ${m.title}`,
         body: `${reason} — ${m.instruction.summary ?? "지시"}`,
         link: `/instructions/${m.instruction.id}`,
-      });
-      void sendNotificationEmail(u.email, {
-        title: `꼭지 확인 필요: ${m.title}`,
-        body: `${reason} — ${m.instruction.summary ?? "지시"}`,
-        link: `/instructions/${m.instruction.id}`,
-      }).catch(() => {});
+      };
+      await notify(prisma, entry);
+      void notifyEmail(entry).catch(() => {});
     }
 
     await prisma.milestone.update({ where: { id: m.id }, data: { lastNudgeAt: now } });

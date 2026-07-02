@@ -24,6 +24,9 @@ async function main() {
   console.log("── rate-limit ──");
   await (await import("./rate-limit.test")).run(t);
 
+  console.log("── notify-prefs ──");
+  await (await import("./notify-prefs.test")).run(t);
+
   console.log("── migrations (embedded Postgres) ──");
   await (await import("./migrations.test")).run(t);
 
