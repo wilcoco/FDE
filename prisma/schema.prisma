@@ -175,6 +175,8 @@ model Tenant {
   /// org identifiers for social-login auto-join (first member from the org binds it)
   googleDomain  String?       @unique
   slackTeamId   String?       @unique
+  /// last stall-sweep run (lazy sweep throttle)
+  lastSweepAt   DateTime?
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
@@ -759,6 +761,7 @@ enum MilestoneStatus {
   PENDING // not started
   ACTIVE // in progress (the org is on it)
   BLOCKED // stuck — surfaces to the owner
+  REVIEW // submitted by the assignee; awaiting the instruction author's check
   DONE // result delivered + proof
 }
 
@@ -799,6 +802,12 @@ model Milestone {
   dueAt          DateTime?
   activatedAt    DateTime?
   doneAt         DateTime?
+  /// when the assignee submitted for review (status REVIEW)
+  submittedAt    DateTime?
+  /// reviewer's rework note; set on 반려, cleared on approve
+  returnNote     String?
+  /// last stall/overdue nudge — dedups repeat notifications
+  lastNudgeAt    DateTime?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 

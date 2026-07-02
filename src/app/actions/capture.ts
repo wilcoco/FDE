@@ -4,8 +4,12 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requireContext } from "@/lib/session";
-import { generateMilestones, regenerateMilestones, synthesizeStrategy } from "@/lib/ai";
+import { generateMilestones, regenerateMilestones } from "@/lib/ai";
 import { notify } from "@/lib/notify";
+import { sendNotificationEmail } from "@/lib/mail";
+import { atLeast } from "@/lib/rbac";
+import { resolveStatusChange, canReview } from "@/lib/milestone-rules";
+import { runSynthesisForTenant, maybeAutoSynthesize } from "@/lib/synthesis";
 import type { MilestoneStatus, Prisma } from "@prisma/client";
 
 /** Capture an owner instruction → AI decomposes into coarse milestones (꼭지). */
@@ -43,6 +47,9 @@ export async function captureInstruction(formData: FormData) {
     });
     return inst;
   });
+
+  // strategic coherence: re-synthesize in the background every few instructions
+  void maybeAutoSynthesize(tenant.id, user.id);
 
   redirect(`/instructions/${instruction.id}`);
 }
@@ -89,7 +96,10 @@ export async function regenerateInstruction(formData: FormData) {
 }
 
 async function ownMilestone(tenantId: string, milestoneId: string) {
-  const m = await prisma.milestone.findFirst({ where: { id: milestoneId, tenantId } });
+  const m = await prisma.milestone.findFirst({
+    where: { id: milestoneId, tenantId },
+    include: { instruction: { select: { id: true, authorId: true, summary: true } } },
+  });
   if (!m) throw new Error("꼭지를 찾을 수 없습니다");
   return m;
 }
@@ -110,52 +120,202 @@ export async function updateMilestone(formData: FormData) {
 }
 
 export async function assignMilestoneOwner(formData: FormData) {
-  const { tenant } = await requireContext();
+  const { tenant, user } = await requireContext();
   const id = String(formData.get("id") ?? "");
   const ownerId = String(formData.get("ownerId") ?? "") || null;
   const m = await ownMilestone(tenant.id, id);
   await prisma.milestone.update({ where: { id }, data: { ownerId } });
-  if (ownerId && m.status === "ACTIVE") {
+
+  if (ownerId && ownerId !== user.id) {
+    const owner = await prisma.user.findFirst({
+      where: { id: ownerId, tenantId: tenant.id, status: "ACTIVE" },
+      select: { email: true },
+    });
     await notify(prisma, {
       tenantId: tenant.id, userId: ownerId, type: "MILESTONE_ASSIGNED",
-      title: `꼭지가 배정되었습니다: ${m.title}`, link: `/instructions/${m.instructionId}`,
+      title: `꼭지가 배정되었습니다: ${m.title}`,
+      body: m.status === "PENDING" ? "대기 상태 — 순서가 되면 시작됩니다." : undefined,
+      link: `/instructions/${m.instructionId}`,
     });
+    if (owner) {
+      void sendNotificationEmail(owner.email, {
+        title: `꼭지가 배정되었습니다: ${m.title}`,
+        body: m.instruction.summary ?? undefined,
+        link: `/instructions/${m.instructionId}`,
+      }).catch(() => {});
+    }
   }
   revalidatePath(`/instructions/${m.instructionId}`);
 }
 
+/** Activate the next PENDING milestone after `m` completes (light sequencing). */
+async function activateNext(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  m: { instructionId: string; order: number },
+) {
+  const next = await tx.milestone.findFirst({
+    where: { tenantId, instructionId: m.instructionId, status: "PENDING", order: { gt: m.order } },
+    orderBy: { order: "asc" },
+  });
+  if (!next) return null;
+  await tx.milestone.update({
+    where: { id: next.id },
+    data: { status: "ACTIVE", activatedAt: new Date() },
+  });
+  if (next.ownerId) {
+    await notify(tx, {
+      tenantId, userId: next.ownerId, type: "MILESTONE_ASSIGNED",
+      title: `다음 꼭지가 시작되었습니다: ${next.title}`,
+      link: `/instructions/${m.instructionId}`,
+    });
+  }
+  return next;
+}
+
+/**
+ * Status change through the review gate: an assignee's "완료" is a CLAIM —
+ * it becomes REVIEW until the instruction author (or an admin) confirms it.
+ */
 export async function setMilestoneStatus(formData: FormData) {
-  const { tenant } = await requireContext();
+  const { tenant, user } = await requireContext();
   const id = String(formData.get("id") ?? "");
-  const status = String(formData.get("status") ?? "PENDING") as MilestoneStatus;
+  const requested = String(formData.get("status") ?? "PENDING") as MilestoneStatus;
   const m = await ownMilestone(tenant.id, id);
+
+  const actor = {
+    isAuthor: m.instruction.authorId === user.id,
+    isAdmin: atLeast(user.role, "ADMIN"),
+  };
+  const change = resolveStatusChange(requested, actor);
 
   await prisma.$transaction(async (tx) => {
     await tx.milestone.update({
       where: { id },
       data: {
-        status,
-        activatedAt: status === "ACTIVE" && !m.activatedAt ? new Date() : m.activatedAt,
-        doneAt: status === "DONE" ? new Date() : null,
+        status: change.status,
+        activatedAt: change.status === "ACTIVE" && !m.activatedAt ? new Date() : m.activatedAt,
+        doneAt: change.status === "DONE" ? new Date() : null,
+        submittedAt: change.status === "REVIEW" ? new Date() : m.submittedAt,
+        // a direct DONE (author/admin) settles any open rework note
+        returnNote: change.status === "DONE" ? null : m.returnNote,
       },
     });
-    // auto-activate the next pending milestone when one completes (light sequencing)
-    if (status === "DONE") {
-      const next = await tx.milestone.findFirst({
-        where: { tenantId: tenant.id, instructionId: m.instructionId, status: "PENDING", order: { gt: m.order } },
-        orderBy: { order: "asc" },
+    if (change.status === "DONE") {
+      await activateNext(tx, tenant.id, m);
+    }
+    // notify once per submission — re-submitting an already-REVIEW item is silent
+    if (change.needsReview && m.instruction.authorId !== user.id && m.status !== "REVIEW") {
+      await notify(tx, {
+        tenantId: tenant.id, userId: m.instruction.authorId, type: "MILESTONE_REVIEW",
+        title: `검수 요청: ${m.title}`,
+        body: `${user.name} 님이 완료를 제출했습니다. 기대 결과와 맞는지 확인하세요.`,
+        link: `/instructions/${m.instructionId}`,
       });
-      if (next) {
-        await tx.milestone.update({ where: { id: next.id }, data: { status: "ACTIVE", activatedAt: new Date() } });
-        if (next.ownerId) {
-          await notify(tx, {
-            tenantId: tenant.id, userId: next.ownerId, type: "MILESTONE_ASSIGNED",
-            title: `다음 꼭지가 시작되었습니다: ${next.title}`, link: `/instructions/${m.instructionId}`,
-          });
-        }
-      }
     }
   });
+
+  if (change.needsReview && m.instruction.authorId !== user.id && m.status !== "REVIEW") {
+    const author = await prisma.user.findFirst({
+      where: { id: m.instruction.authorId, tenantId: tenant.id, status: "ACTIVE" },
+      select: { email: true },
+    });
+    if (author) {
+      void sendNotificationEmail(author.email, {
+        title: `검수 요청: ${m.title}`,
+        body: `${user.name} 님이 완료를 제출했습니다.`,
+        link: `/instructions/${m.instructionId}`,
+      }).catch(() => {});
+    }
+  }
+
+  revalidatePath(`/instructions/${m.instructionId}`);
+  revalidatePath("/inbox");
+}
+
+/** Author/admin confirms a submitted milestone: REVIEW → DONE (+ next starts). */
+export async function approveMilestone(formData: FormData) {
+  const { tenant, user } = await requireContext();
+  const id = String(formData.get("id") ?? "");
+  const m = await ownMilestone(tenant.id, id);
+  const actor = {
+    isAuthor: m.instruction.authorId === user.id,
+    isAdmin: atLeast(user.role, "ADMIN"),
+  };
+  if (!canReview(actor) || m.status !== "REVIEW") return;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.milestone.update({
+      where: { id },
+      data: { status: "DONE", doneAt: new Date(), returnNote: null },
+    });
+    await activateNext(tx, tenant.id, m);
+    if (m.ownerId && m.ownerId !== user.id) {
+      await notify(tx, {
+        tenantId: tenant.id, userId: m.ownerId, type: "MILESTONE_APPROVED",
+        title: `확인 완료 ✅: ${m.title}`,
+        body: "제출한 결과가 확인되었습니다.",
+        link: `/instructions/${m.instructionId}`,
+      });
+    }
+    await tx.auditLog.create({
+      data: { tenantId: tenant.id, actorId: user.id, action: "MILESTONE_APPROVED", target: m.id },
+    });
+  });
+
+  revalidatePath(`/instructions/${m.instructionId}`);
+  revalidatePath("/inbox");
+  revalidatePath("/dashboard");
+}
+
+/** Author/admin returns a submitted milestone for rework: REVIEW → ACTIVE + note. */
+export async function returnMilestone(formData: FormData) {
+  const { tenant, user } = await requireContext();
+  const id = String(formData.get("id") ?? "");
+  const note = String(formData.get("note") ?? "").trim();
+  const m = await ownMilestone(tenant.id, id);
+  const actor = {
+    isAuthor: m.instruction.authorId === user.id,
+    isAdmin: atLeast(user.role, "ADMIN"),
+  };
+  if (!canReview(actor) || m.status !== "REVIEW") return;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.milestone.update({
+      where: { id },
+      data: {
+        status: "ACTIVE",
+        returnNote: note || "기대 결과와 다릅니다. 보완해 주세요.",
+        submittedAt: null,
+      },
+    });
+    if (m.ownerId) {
+      await notify(tx, {
+        tenantId: tenant.id, userId: m.ownerId, type: "MILESTONE_RETURNED",
+        title: `반려됨 🔁: ${m.title}`,
+        body: note || "기대 결과와 다릅니다. 보완해 주세요.",
+        link: `/instructions/${m.instructionId}`,
+      });
+    }
+    await tx.auditLog.create({
+      data: { tenantId: tenant.id, actorId: user.id, action: "MILESTONE_RETURNED", target: m.id },
+    });
+  });
+
+  if (m.ownerId) {
+    const owner = await prisma.user.findFirst({
+      where: { id: m.ownerId, tenantId: tenant.id, status: "ACTIVE" },
+      select: { email: true },
+    });
+    if (owner) {
+      void sendNotificationEmail(owner.email, {
+        title: `반려됨: ${m.title}`,
+        body: note || "기대 결과와 다릅니다. 보완해 주세요.",
+        link: `/instructions/${m.instructionId}`,
+      }).catch(() => {});
+    }
+  }
+
   revalidatePath(`/instructions/${m.instructionId}`);
   revalidatePath("/inbox");
 }
@@ -214,16 +374,6 @@ export async function archiveInstruction(formData: FormData) {
 /** Run the upward strategic-coherence synthesis over the instruction stream. */
 export async function runSynthesis() {
   const { tenant, user } = await requireContext();
-  const [instructions, objectives] = await Promise.all([
-    prisma.instruction.findMany({ where: { tenantId: tenant.id, status: "ACTIVE" }, orderBy: { createdAt: "desc" }, take: 50 }),
-    prisma.objective.findMany({ where: { tenantId: tenant.id } }),
-  ]);
-  const result = await synthesizeStrategy(
-    instructions.map((i) => ({ id: i.id, text: i.summary || i.rawText })),
-    objectives.map((o) => ({ id: o.id, title: o.title })),
-  );
-  await prisma.strategySynthesis.create({
-    data: { tenantId: tenant.id, createdById: user.id, result: result as unknown as Prisma.InputJsonValue },
-  });
+  await runSynthesisForTenant(tenant.id, user.id);
   revalidatePath("/strategy");
 }

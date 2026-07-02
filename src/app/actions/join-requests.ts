@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { requireRole } from "@/lib/session";
 import { hashPassword } from "@/lib/auth";
 import { notify } from "@/lib/notify";
+import { sendNotificationEmail } from "@/lib/mail";
 
 export interface FormState {
   error?: string;
@@ -42,9 +43,12 @@ async function notifyAdmins(
 ) {
   const admins = await prisma.user.findMany({
     where: { tenantId, status: "ACTIVE", role: { in: ["OWNER", "ADMIN"] } },
-    select: { id: true },
+    select: { id: true, email: true },
   });
   await Promise.all(admins.map((a) => notify(prisma, { tenantId, userId: a.id, ...entry })));
+  for (const a of admins) {
+    void sendNotificationEmail(a.email, entry).catch(() => {});
+  }
 }
 
 /** Public: submit a request to join an existing company (pending approval). */
@@ -132,6 +136,12 @@ export async function approveJoinRequest(formData: FormData) {
       data: { tenantId: tenant.id, actorId: admin.id, action: "JOIN_REQUEST_APPROVED", target: req.email },
     });
   });
+
+  void sendNotificationEmail(req.email, {
+    title: `${tenant.name} 가입이 승인되었습니다`,
+    body: "이메일과 가입 시 정한 비밀번호로 로그인하세요.",
+    link: "/login",
+  }).catch(() => {});
 
   revalidatePath("/members");
   revalidatePath("/org");

@@ -55,6 +55,44 @@ function appUrl(): string {
   return process.env.APP_URL?.replace(/\/$/, "") ?? "http://localhost:3000";
 }
 
+/** Escape user-supplied text before interpolating into email HTML. */
+export function escapeHtml(s: string): string {
+  return s
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+/**
+ * Generic notification email mirroring an in-app notification.
+ * Fire-and-forget at call sites (never inside a DB transaction); silently a
+ * no-op when mail isn't configured.
+ */
+export async function sendNotificationEmail(
+  to: string,
+  n: { title: string; body?: string; link?: string },
+): Promise<boolean> {
+  if (!mailConfigured()) return false;
+  const url = n.link ? `${appUrl()}${n.link.startsWith("/") ? n.link : `/${n.link}`}` : appUrl();
+  const title = escapeHtml(n.title);
+  const body = n.body ? escapeHtml(n.body) : "";
+  const html = `
+    <div style="font-family:system-ui,-apple-system,'Malgun Gothic',sans-serif;max-width:480px;margin:0 auto;padding:24px">
+      <div style="font-weight:800;color:#4f46e5;font-size:20px">FlowDesk</div>
+      <p style="color:#111827;font-size:15px;font-weight:600">${title}</p>
+      ${body ? `<p style="color:#374151;font-size:14px;line-height:1.6">${body}</p>` : ""}
+      <p style="margin:24px 0">
+        <a href="${url}" style="background:#4f46e5;color:#fff;text-decoration:none;padding:12px 20px;border-radius:8px;font-weight:600;font-size:14px">
+          FlowDesk에서 확인
+        </a>
+      </p>
+    </div>`;
+  const text = `${n.title}\n${n.body ?? ""}\n${url}`;
+  return sendMail({ to, subject: `[FlowDesk] ${n.title}`, html, text });
+}
+
 /** Compose + send a password-reset email. */
 export async function sendPasswordResetEmail(
   to: string,
@@ -62,10 +100,11 @@ export async function sendPasswordResetEmail(
   token: string,
 ): Promise<boolean> {
   const link = `${appUrl()}/reset/${token}`;
+  const safeName = escapeHtml(name);
   const html = `
     <div style="font-family:system-ui,-apple-system,'Malgun Gothic',sans-serif;max-width:480px;margin:0 auto;padding:24px">
       <div style="font-weight:800;color:#4f46e5;font-size:20px">FlowDesk</div>
-      <p style="color:#111827;font-size:15px">안녕하세요 ${name}님,</p>
+      <p style="color:#111827;font-size:15px">안녕하세요 ${safeName}님,</p>
       <p style="color:#374151;font-size:14px;line-height:1.6">
         비밀번호 재설정 요청을 받았습니다. 아래 버튼을 눌러 새 비밀번호를 설정하세요.
         본인이 요청하지 않았다면 이 메일을 무시하셔도 됩니다.

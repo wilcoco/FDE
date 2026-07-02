@@ -2,7 +2,12 @@ import Link from "next/link";
 import { requireContext } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { runSynthesis } from "@/app/actions/capture";
+import { promoteInstructionsToTemplate } from "@/app/actions/process";
+import SubmitButton from "@/components/SubmitButton";
 import type { StrategyResult } from "@/lib/ai";
+
+/** groups with this many instructions are flagged as a recurring pattern */
+const RECURRING_MIN = 3;
 
 export default async function StrategyPage() {
   const { tenant } = await requireContext();
@@ -23,6 +28,7 @@ export default async function StrategyPage() {
           <h1 className="text-2xl font-bold">전략 통일성</h1>
           <p className="mt-1 text-sm text-gray-500">
             정신없이 내린 지시들 사이의 전략적 일관성을 AI가 해석합니다 — 묶고, 모순을 잡고, 목표 없는 지시를 드러냅니다.
+            <span className="text-gray-400"> (새 지시 3건마다 자동 분석)</span>
           </p>
         </div>
         <form action={runSynthesis}>
@@ -42,16 +48,34 @@ export default async function StrategyPage() {
             <h2 className="mb-3 font-semibold">전략 그룹</h2>
             {r.groups?.length ? (
               <div className="space-y-3">
-                {r.groups.map((g, i) => (
-                  <div key={i} className="rounded-md bg-indigo-50 p-3">
-                    <div className="font-medium text-indigo-800">{g.theme}</div>
-                    <ul className="mt-1 list-disc pl-5 text-sm text-gray-600">
-                      {g.instructionIds.map((iid) => (
-                        <li key={iid}><Link href={`/instructions/${iid}`} className="hover:underline">{instLabel.get(iid) ?? iid}</Link></li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
+                {r.groups.map((g, i) => {
+                  const recurring = g.instructionIds.length >= RECURRING_MIN;
+                  return (
+                    <div key={i} className="rounded-md bg-indigo-50 p-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium text-indigo-800">{g.theme}</span>
+                        {recurring && <span className="badge bg-amber-100 text-amber-700">🔁 반복 감지</span>}
+                      </div>
+                      <ul className="mt-1 list-disc pl-5 text-sm text-gray-600">
+                        {g.instructionIds.map((iid) => (
+                          <li key={iid}><Link href={`/instructions/${iid}`} className="hover:underline">{instLabel.get(iid) ?? iid}</Link></li>
+                        ))}
+                      </ul>
+                      {recurring && (
+                        <form action={promoteInstructionsToTemplate} className="mt-2 flex items-center gap-2">
+                          <input type="hidden" name="theme" value={g.theme} />
+                          <input type="hidden" name="instructionIds" value={g.instructionIds.join(",")} />
+                          <SubmitButton pendingText="AI가 표준 프로세스를 설계하는 중…">
+                            ⚙ 프로세스 템플릿으로 승격
+                          </SubmitButton>
+                          <span className="text-xs text-gray-500">
+                            같은 지시가 반복됩니다 — 표준 프로세스로 만들면 매번 지시하지 않아도 됩니다.
+                          </span>
+                        </form>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             ) : <p className="text-sm text-gray-400">묶인 그룹 없음.</p>}
           </div>

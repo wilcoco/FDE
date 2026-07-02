@@ -2,11 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireContext } from "@/lib/session";
 import { prisma } from "@/lib/db";
+import { atLeast } from "@/lib/rbac";
 import { MilestoneFlow, MilestoneBoard, type MilestoneCard } from "@/components/MilestoneViews";
 import {
   updateMilestone, assignMilestoneOwner, setMilestoneStatus, addMilestoneProof,
   addMilestone, deleteMilestone, linkInstructionObjective, archiveInstruction,
-  regenerateInstruction,
+  regenerateInstruction, approveMilestone, returnMilestone,
 } from "@/app/actions/capture";
 import SubmitButton from "@/components/SubmitButton";
 
@@ -14,7 +15,7 @@ interface ProofItem { type: string; value: string; by: string; at: string }
 
 export default async function InstructionDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { tenant } = await requireContext();
+  const { tenant, user } = await requireContext();
   const inst = await prisma.instruction.findFirst({
     where: { id, tenantId: tenant.id },
     include: {
@@ -30,9 +31,15 @@ export default async function InstructionDetail({ params }: { params: Promise<{ 
     prisma.objective.findMany({ where: { tenantId: tenant.id }, orderBy: { title: "asc" } }),
   ]);
 
+  const now = new Date();
+  const canConfirm = inst.authorId === user.id || atLeast(user.role, "ADMIN");
+  const isOverdue = (m: { dueAt: Date | null; status: string }) =>
+    m.dueAt != null && m.dueAt < now && m.status !== "DONE";
+
   const cards: MilestoneCard[] = inst.milestones.map((m) => ({
     id: m.id, order: m.order, title: m.title, status: m.status,
     ownerName: m.owner?.name, expectedResult: m.expectedResult,
+    overdue: isOverdue(m),
   }));
 
   return (
@@ -95,12 +102,54 @@ export default async function InstructionDetail({ params }: { params: Promise<{ 
           return (
             <div key={m.id} className="card">
               <div className="flex items-center justify-between">
-                <span className="font-medium">꼭지 {i + 1}. {m.title}</span>
+                <span className="font-medium">
+                  꼭지 {i + 1}. {m.title}
+                  {isOverdue(m) && (
+                    <span className="badge ml-2 bg-red-100 text-red-700">
+                      ⏰ 기한 지남 {m.dueAt && `(${m.dueAt.toLocaleDateString()})`}
+                    </span>
+                  )}
+                </span>
                 <form action={deleteMilestone}>
                   <input type="hidden" name="id" value={m.id} />
                   <button className="text-xs text-gray-400 hover:text-red-600">삭제</button>
                 </form>
               </div>
+
+              {/* review gate banner */}
+              {m.status === "REVIEW" && (
+                <div className="mt-3 rounded-md border border-violet-200 bg-violet-50 p-3">
+                  <p className="text-sm font-medium text-violet-800">
+                    🔍 검수 대기 — {m.owner?.name ?? "담당자"} 님이 완료를 제출했습니다
+                    {m.submittedAt && <span className="ml-1 text-xs text-violet-500">({m.submittedAt.toLocaleString()})</span>}
+                  </p>
+                  {m.expectedResult && (
+                    <p className="mt-1 text-xs text-gray-600">기대 결과: {m.expectedResult}</p>
+                  )}
+                  {canConfirm ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <form action={approveMilestone}>
+                        <input type="hidden" name="id" value={m.id} />
+                        <button className="btn px-3 py-1.5 text-xs">확인 (완료 확정)</button>
+                      </form>
+                      <form action={returnMilestone} className="flex flex-1 gap-1">
+                        <input type="hidden" name="id" value={m.id} />
+                        <input name="note" placeholder="반려 사유 (보완 지시)" className="input flex-1 py-1.5 text-xs" />
+                        <button className="btn-danger px-3 py-1.5 text-xs">반려</button>
+                      </form>
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-xs text-gray-400">지시자({inst.author.name})의 확인을 기다리는 중입니다.</p>
+                  )}
+                </div>
+              )}
+
+              {/* rework note from a return */}
+              {m.status !== "REVIEW" && m.returnNote && m.status !== "DONE" && (
+                <div className="mt-3 rounded-md border border-orange-200 bg-orange-50 p-3">
+                  <p className="text-sm text-orange-800">🔁 반려됨 — {m.returnNote}</p>
+                </div>
+              )}
 
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 <form action={updateMilestone} className="space-y-2">
@@ -122,14 +171,19 @@ export default async function InstructionDetail({ params }: { params: Promise<{ 
                   </form>
                   <form action={setMilestoneStatus} className="flex gap-1">
                     <input type="hidden" name="id" value={m.id} />
-                    <select name="status" defaultValue={m.status} className="input">
+                    <select name="status" defaultValue={m.status === "REVIEW" ? "ACTIVE" : m.status} className="input">
                       <option value="PENDING">대기</option>
                       <option value="ACTIVE">진행</option>
                       <option value="BLOCKED">막힘</option>
-                      <option value="DONE">완료</option>
+                      <option value="DONE">{canConfirm ? "완료 (확정)" : "완료 제출 (검수 요청)"}</option>
                     </select>
                     <button className="btn-ghost text-xs">상태 변경</button>
                   </form>
+                  {!canConfirm && (
+                    <p className="text-[11px] text-gray-400">
+                      완료를 제출하면 지시자가 기대 결과와 대조해 확정합니다.
+                    </p>
+                  )}
                 </div>
               </div>
 

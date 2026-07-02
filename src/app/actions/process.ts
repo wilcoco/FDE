@@ -31,14 +31,13 @@ function nodeConfig(n: GenProcess["nodes"][number]): {
   return { approvalKind: null, config: {} };
 }
 
-/** Generate a process graph from a natural-language manual and persist as DRAFT. */
-export async function generateAndCreate(formData: FormData) {
-  const { tenant, user } = await requireContext();
-  const manual = String(formData.get("manual") ?? "").trim();
-  if (!manual) redirect("/processes/new?error=empty");
-
-  const gen = await generateProcess(manual);
-
+/** Persist a generated process graph as a DRAFT definition (shared). */
+async function persistGeneratedDefinition(
+  tenantId: string,
+  userId: string,
+  manual: string,
+  gen: GenProcess,
+) {
   // dedupe node keys
   const seen = new Set<string>();
   for (const n of gen.nodes) {
@@ -48,16 +47,16 @@ export async function generateAndCreate(formData: FormData) {
     seen.add(k);
   }
 
-  const def = await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     const definition = await tx.processDefinition.create({
       data: {
-        tenantId: tenant.id,
+        tenantId,
         name: gen.name || "새 프로세스",
         description: gen.description,
         sourceManual: manual,
         formSchema: gen.formFields as Prisma.InputJsonValue,
         status: "DRAFT",
-        createdById: user.id,
+        createdById: userId,
       },
     });
     const idByKey = new Map<string, string>();
@@ -65,7 +64,7 @@ export async function generateAndCreate(formData: FormData) {
       const { approvalKind, config } = nodeConfig(n);
       const created = await tx.processNode.create({
         data: {
-          tenantId: tenant.id,
+          tenantId,
           definitionId: definition.id,
           key: n.key,
           type: n.type as NodeType,
@@ -86,7 +85,7 @@ export async function generateAndCreate(formData: FormData) {
           : {};
       await tx.processEdge.create({
         data: {
-          tenantId: tenant.id,
+          tenantId,
           definitionId: definition.id,
           fromNodeId: from,
           toNodeId: to,
@@ -97,6 +96,54 @@ export async function generateAndCreate(formData: FormData) {
       });
     }
     return definition;
+  });
+}
+
+/** Generate a process graph from a natural-language manual and persist as DRAFT. */
+export async function generateAndCreate(formData: FormData) {
+  const { tenant, user } = await requireContext();
+  const manual = String(formData.get("manual") ?? "").trim();
+  if (!manual) redirect("/processes/new?error=empty");
+
+  const gen = await generateProcess(manual);
+  const def = await persistGeneratedDefinition(tenant.id, user.id, manual, gen);
+
+  redirect(`/processes/${def.id}`);
+}
+
+/**
+ * 암묵지 → 정형화: promote a recurring instruction theme into a reusable
+ * process template. Feeds the repeated instructions to the AI as the manual.
+ */
+export async function promoteInstructionsToTemplate(formData: FormData) {
+  const { tenant, user } = await requireContext();
+  const theme = String(formData.get("theme") ?? "").trim();
+  const ids = String(formData.get("instructionIds") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (ids.length < 2) redirect("/strategy");
+
+  const instructions = await prisma.instruction.findMany({
+    where: { tenantId: tenant.id, id: { in: ids } },
+    orderBy: { createdAt: "asc" },
+  });
+  if (instructions.length < 2) redirect("/strategy");
+
+  const manual =
+    `다음은 "${theme || "반복 업무"}" 주제로 반복해서 내려온 대표의 지시들입니다. ` +
+    `이 반복 패턴을 일반화하여 재사용 가능한 표준 업무 프로세스로 만들어 주세요.\n\n` +
+    instructions.map((i, k) => `지시 ${k + 1}) ${i.summary ?? ""}\n${i.rawText}`).join("\n\n");
+
+  const gen = await generateProcess(manual);
+  const def = await persistGeneratedDefinition(tenant.id, user.id, manual, gen);
+  await prisma.auditLog.create({
+    data: {
+      tenantId: tenant.id,
+      actorId: user.id,
+      action: "TEMPLATE_PROMOTED_FROM_INSTRUCTIONS",
+      target: def.id,
+    },
   });
 
   redirect(`/processes/${def.id}`);
