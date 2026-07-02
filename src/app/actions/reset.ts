@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
 import { startSession } from "@/lib/session";
 import { sendPasswordResetEmail } from "@/lib/mail";
+import { consume, clientIp } from "@/lib/rate-limit";
 
 export interface FormState {
   error?: string;
@@ -25,6 +26,12 @@ export async function requestPasswordReset(
   const company = String(formData.get("slug") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   if (!email) return { error: "이메일을 입력하세요." };
+
+  // mail-bomb guard: same success response either way (no enumeration signal),
+  // but silently stop issuing tokens/emails past the limit
+  const ipOk = consume("reset-ip", await clientIp(), 10, 60 * 60 * 1000).ok;
+  const emailOk = consume("reset-email", email, 3, 60 * 60 * 1000).ok;
+  if (!ipOk || !emailOk) return { ok: true };
 
   // Company is optional; reset every active account with this email (usually one).
   let where;

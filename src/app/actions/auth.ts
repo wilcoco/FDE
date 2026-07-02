@@ -5,6 +5,10 @@ import { prisma } from "@/lib/db";
 import { hashPassword, verifyPassword } from "@/lib/auth";
 import { startSession, endSession } from "@/lib/session";
 import { createTenantWithOwner } from "@/lib/provisioning";
+import { consume, peek, clear, clientIp, retryMinutes } from "@/lib/rate-limit";
+
+const LOGIN_LIMIT = 5; // failed attempts per 10min per ip+email
+const LOGIN_WINDOW = 10 * 60 * 1000;
 
 export interface FormState {
   error?: string;
@@ -21,6 +25,11 @@ export async function signupAction(
 
   if (!companyName || !name || !email || password.length < 6) {
     return { error: "모든 항목을 입력하세요 (비밀번호 6자 이상)." };
+  }
+
+  const rl = consume("signup", await clientIp(), 5, 60 * 60 * 1000);
+  if (!rl.ok) {
+    return { error: `가입 시도가 너무 많습니다. ${retryMinutes(rl)}분 후 다시 시도하세요.` };
   }
 
   const { tenant, user } = await createTenantWithOwner(companyName, {
@@ -41,6 +50,17 @@ export async function loginAction(
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
   if (!email || !password) return { error: "이메일과 비밀번호를 입력하세요." };
+
+  // brute-force guard: only FAILED attempts count; success clears the bucket
+  const rlKey = `${await clientIp()}:${email}`;
+  const blocked = peek("login", rlKey, LOGIN_LIMIT);
+  if (!blocked.ok) {
+    return { error: `로그인 시도가 너무 많습니다. ${retryMinutes(blocked)}분 후 다시 시도하세요.` };
+  }
+  const fail = (msg: string): FormState => {
+    consume("login", rlKey, LOGIN_LIMIT, LOGIN_WINDOW);
+    return { error: msg };
+  };
 
   // Company is OPTIONAL. If given, match by slug OR name (case-insensitive);
   // otherwise consider every tenant this email belongs to and disambiguate by
@@ -82,13 +102,14 @@ export async function loginAction(
     if (pendingJoin) {
       return { error: "가입 요청이 아직 승인 대기 중입니다. 관리자가 승인하면 로그인할 수 있어요." };
     }
-    return { error: "이메일 또는 비밀번호가 올바르지 않습니다." };
+    return fail("이메일 또는 비밀번호가 올바르지 않습니다.");
   }
   if (matches.length > 1) {
     return { error: "이 이메일이 여러 회사에 있습니다. 회사명(또는 식별자)을 함께 입력해 주세요." };
   }
 
   const user = matches[0];
+  clear("login", rlKey);
   await startSession({ userId: user.id, tenantId: user.tenantId, role: user.role });
   redirect("/dashboard");
 }

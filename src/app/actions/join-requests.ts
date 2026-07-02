@@ -6,6 +6,7 @@ import { requireRole } from "@/lib/session";
 import { hashPassword } from "@/lib/auth";
 import { notify } from "@/lib/notify";
 import { sendNotificationEmail } from "@/lib/mail";
+import { consume, clientIp, retryMinutes } from "@/lib/rate-limit";
 
 export interface FormState {
   error?: string;
@@ -63,6 +64,11 @@ export async function requestToJoin(
   if (!tenantId) return { error: "가입할 회사를 먼저 선택하세요." };
   if (!name || !email || password.length < 6) {
     return { error: "이름·이메일·비밀번호(6자 이상)를 입력하세요." };
+  }
+
+  const rl = consume("join-req", await clientIp(), 10, 60 * 60 * 1000);
+  if (!rl.ok) {
+    return { error: `요청이 너무 많습니다. ${retryMinutes(rl)}분 후 다시 시도하세요.` };
   }
 
   const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });

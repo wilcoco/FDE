@@ -7,6 +7,7 @@ import { prisma } from "@/lib/db";
 import { requireRole } from "@/lib/session";
 import { startSession } from "@/lib/session";
 import { hashPassword } from "@/lib/auth";
+import { consume, clientIp, retryMinutes } from "@/lib/rate-limit";
 import type { Role } from "@prisma/client";
 
 export interface FormState {
@@ -68,6 +69,10 @@ export async function joinByCodeAction(
   const password = String(formData.get("password") ?? "");
   if (!name || !email || password.length < 6) {
     return { error: "이름·이메일·비밀번호(6자 이상)를 입력하세요." };
+  }
+  const rl = consume("join-code", await clientIp(), 10, 60 * 60 * 1000);
+  if (!rl.ok) {
+    return { error: `가입 시도가 너무 많습니다. ${retryMinutes(rl)}분 후 다시 시도하세요.` };
   }
   const tenant = await prisma.tenant.findUnique({ where: { joinCode: code } });
   if (!tenant) return { error: "유효하지 않거나 비활성화된 가입 링크입니다." };
