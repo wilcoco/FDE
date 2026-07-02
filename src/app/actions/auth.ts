@@ -74,6 +74,14 @@ export async function loginAction(
   }
 
   if (matches.length === 0) {
+    // if they applied to join a company and are still waiting, say so —
+    // "wrong password" would send them down a useless reset path
+    const pendingJoin = await prisma.joinRequest.findFirst({
+      where: { email, status: "PENDING" },
+    });
+    if (pendingJoin) {
+      return { error: "가입 요청이 아직 승인 대기 중입니다. 관리자가 승인하면 로그인할 수 있어요." };
+    }
     return { error: "이메일 또는 비밀번호가 올바르지 않습니다." };
   }
   if (matches.length > 1) {

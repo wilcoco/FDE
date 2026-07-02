@@ -44,7 +44,7 @@ export default async function InstructionDetail({ params }: { params: Promise<{ 
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <Link href="/instructions" className="text-sm text-gray-400 hover:underline">← 지시 목록</Link>
           <h1 className="mt-1 text-2xl font-bold">{inst.summary || "지시"}</h1>

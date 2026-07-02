@@ -146,7 +146,7 @@ export default async function Inbox() {
                 )}
                 {m.expectedResult && <p className="text-xs text-gray-400">기대결과: {m.expectedResult}</p>}
               </div>
-              <span className="text-sm text-indigo-600">열기 →</span>
+              <span className="shrink-0 whitespace-nowrap text-sm text-indigo-600">열기 →</span>
             </Link>
           ))}
         </div>
@@ -165,7 +165,7 @@ export default async function Inbox() {
                 {t.directives.length > 0 && <span className="badge ml-2 bg-orange-100 text-orange-700">업무지시 {t.directives.length}</span>}
                 {t.reworkCount > 0 && <span className="badge ml-2 bg-orange-50 text-orange-600">재작업 {t.reworkCount}</span>}
               </div>
-              <span className="text-sm text-indigo-600">열기 →</span>
+              <span className="shrink-0 whitespace-nowrap text-sm text-indigo-600">열기 →</span>
             </Link>
           ))}
         </div>
