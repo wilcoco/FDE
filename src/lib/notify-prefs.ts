@@ -48,6 +48,12 @@ export const CATEGORIES: Category[] = [
     defaults: { inapp: true, email: false },
   },
   {
+    key: "comment",
+    label: "협업 노트·멘션",
+    desc: "내가 참여한 업무에 새 노트가 달리거나 나를 @언급했을 때",
+    defaults: { inapp: true, email: false },
+  },
+  {
     key: "approval",
     label: "전자결재",
     desc: "결재 요청 도착, 승인·반려 결과",
@@ -71,6 +77,8 @@ const TYPE_TO_CATEGORY: Record<string, string> = {
   DIRECTIVE: "decision",
   MILESTONE_NUDGE: "nudge",
   PROOF_ADDED: "activity",
+  COMMENT_NEW: "comment",
+  COMMENT_MENTION: "comment",
   APPROVAL_REQUEST: "approval",
   APPROVAL_APPROVED: "approval",
   APPROVAL_REJECTED: "approval",

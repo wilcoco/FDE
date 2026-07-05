@@ -114,6 +114,20 @@ export async function run(t: (name: string, fn: () => void | Promise<void>) => v
     );
   });
 
+  await t("MilestoneComment: instruction-level + milestone-level notes, mentions JSON", async () => {
+    await db.exec(`
+      INSERT INTO "Milestone" (id, "tenantId", "instructionId", "order", title, status, "updatedAt")
+        VALUES ('m2', 't1', 'i1', 2, '노트대상', 'ACTIVE', now());
+      INSERT INTO "MilestoneComment" (id, "tenantId", "instructionId", "milestoneId", "authorId", body, mentions)
+        VALUES ('mc1', 't1', 'i1', NULL, 'u-ceo', '지시 전체 노트', '[]'),
+               ('mc2', 't1', 'i1', 'm2', 'u-staff', '@김대표 확인요', '["u-ceo"]');
+    `);
+    const r = await db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM "MilestoneComment" WHERE "instructionId" = 'i1'`,
+    );
+    assert.equal(r.rows[0].n, 2);
+  });
+
   await t("deleting an instruction cascades to its milestones", async () => {
     await db.exec(`DELETE FROM "Instruction" WHERE id = 'i1'`);
     const r = await db.query<{ n: number }>(

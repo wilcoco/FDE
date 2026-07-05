@@ -27,6 +27,9 @@ async function main() {
   console.log("── notify-prefs ──");
   await (await import("./notify-prefs.test")).run(t);
 
+  console.log("── collab ──");
+  await (await import("./collab.test")).run(t);
+
   console.log("── migrations (embedded Postgres) ──");
   await (await import("./migrations.test")).run(t);
 

@@ -206,6 +206,7 @@ model Tenant {
   milestones     Milestone[]
   syntheses      StrategySynthesis[]
   joinRequests   JoinRequest[]
+  milestoneComments MilestoneComment[]
 }
 
 model User {
@@ -255,6 +256,7 @@ model User {
   createdSyntheses     StrategySynthesis[] @relation("SynthesisCreator")
   decidedJoinRequests  JoinRequest[]       @relation("JoinRequestDecider")
   resetTokens          PasswordResetToken[]
+  milestoneComments    MilestoneComment[]  @relation("MilestoneCommentAuthor")
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -784,9 +786,32 @@ model Instruction {
   author     User        @relation("InstructionAuthor", fields: [authorId], references: [id])
   objective  Objective?  @relation(fields: [objectiveId], references: [id])
   milestones Milestone[]
+  comments   MilestoneComment[]
 
   @@index([tenantId])
   @@index([tenantId, createdAt])
+}
+
+/// A collaboration note on an instruction or a specific milestone (꼭지).
+/// milestoneId null = thread on the whole instruction. mentions = userIds @-tagged.
+model MilestoneComment {
+  id            String   @id @default(cuid())
+  tenantId      String
+  instructionId String
+  milestoneId   String?
+  authorId      String
+  body          String
+  mentions      Json     @default("[]")
+  createdAt     DateTime @default(now())
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  instruction Instruction @relation(fields: [instructionId], references: [id], onDelete: Cascade)
+  milestone   Milestone?  @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+  author      User        @relation("MilestoneCommentAuthor", fields: [authorId], references: [id])
+
+  @@index([tenantId])
+  @@index([instructionId])
+  @@index([milestoneId])
 }
 
 /// A coarse milestone (꼭지) the owner manages: order, owner, expected result,
@@ -816,6 +841,7 @@ model Milestone {
   tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   instruction Instruction @relation(fields: [instructionId], references: [id], onDelete: Cascade)
   owner       User?       @relation("MilestoneOwner", fields: [ownerId], references: [id])
+  comments    MilestoneComment[]
 
   @@index([tenantId])
   @@index([instructionId])

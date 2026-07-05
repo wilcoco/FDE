@@ -4,6 +4,7 @@ import { requireContext } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { atLeast } from "@/lib/rbac";
 import { MilestoneFlow, MilestoneBoard, type MilestoneCard } from "@/components/MilestoneViews";
+import CommentThread, { type CommentView } from "@/components/CommentThread";
 import {
   updateMilestone, assignMilestoneOwner, setMilestoneStatus, addMilestoneProof,
   addMilestone, deleteMilestone, linkInstructionObjective, archiveInstruction,
@@ -26,13 +27,32 @@ export default async function InstructionDetail({ params }: { params: Promise<{ 
   });
   if (!inst) notFound();
 
-  const [members, objectives] = await Promise.all([
+  const [members, objectives, comments] = await Promise.all([
     prisma.user.findMany({ where: { tenantId: tenant.id, status: "ACTIVE" }, orderBy: { name: "asc" } }),
     prisma.objective.findMany({ where: { tenantId: tenant.id }, orderBy: { title: "asc" } }),
+    prisma.milestoneComment.findMany({
+      where: { tenantId: tenant.id, instructionId: id },
+      include: { author: { select: { id: true, name: true } } },
+      orderBy: { createdAt: "asc" },
+    }),
   ]);
 
   const now = new Date();
-  const canConfirm = inst.authorId === user.id || atLeast(user.role, "ADMIN");
+  const isAdmin = atLeast(user.role, "ADMIN");
+  const canConfirm = inst.authorId === user.id || isAdmin;
+  const memberLite = members.map((m) => ({ id: m.id, name: m.name }));
+  const toView = (c: (typeof comments)[number]): CommentView => ({
+    id: c.id, body: c.body, authorName: c.author.name, authorId: c.authorId,
+    createdAt: c.createdAt.toISOString(), canDelete: c.authorId === user.id || isAdmin,
+  });
+  const instructionComments = comments.filter((c) => c.milestoneId == null).map(toView);
+  const commentsByMilestone = new Map<string, CommentView[]>();
+  for (const c of comments) {
+    if (!c.milestoneId) continue;
+    const arr = commentsByMilestone.get(c.milestoneId) ?? [];
+    arr.push(toView(c));
+    commentsByMilestone.set(c.milestoneId, arr);
+  }
   const isOverdue = (m: { dueAt: Date | null; status: string }) =>
     m.dueAt != null && m.dueAt < now && m.status !== "DONE";
 
@@ -73,6 +93,17 @@ export default async function InstructionDetail({ params }: { params: Promise<{ 
       <div className="card">
         <h2 className="mb-3 font-semibold">상태 보드</h2>
         <MilestoneBoard milestones={cards} />
+      </div>
+
+      {/* instruction-level collaboration thread */}
+      <div className="card bg-gray-50/60">
+        <h2 className="mb-3 font-semibold">💬 협업 노트 (지시 전체)</h2>
+        <CommentThread
+          instructionId={inst.id}
+          comments={instructionComments}
+          members={memberLite}
+          currentUserId={user.id}
+        />
       </div>
 
       {/* refine: re-guide the AI to regenerate milestones */}
@@ -208,6 +239,22 @@ export default async function InstructionDetail({ params }: { params: Promise<{ 
                   <button className="btn-ghost text-xs">추가</button>
                 </form>
               </div>
+
+              {/* per-milestone collaboration thread */}
+              <details className="mt-3 rounded-md border border-gray-100" id={`c-${m.id}`}>
+                <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-gray-500">
+                  💬 협업 노트 ({(commentsByMilestone.get(m.id) ?? []).length})
+                </summary>
+                <div className="border-t border-gray-100 p-3">
+                  <CommentThread
+                    instructionId={inst.id}
+                    milestoneId={m.id}
+                    comments={commentsByMilestone.get(m.id) ?? []}
+                    members={memberLite}
+                    currentUserId={user.id}
+                  />
+                </div>
+              </details>
             </div>
           );
         })}
