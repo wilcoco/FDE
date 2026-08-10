@@ -36,6 +36,9 @@ async function main() {
   console.log("── datatable ──");
   await (await import("./datatable.test")).run(t);
 
+  console.log("── inbound-email ──");
+  await (await import("./inbound-email.test")).run(t);
+
   console.log("── migrations (embedded Postgres) ──");
   await (await import("./migrations.test")).run(t);
 

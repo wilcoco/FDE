@@ -21,6 +21,22 @@ export async function disableJoinLink() {
   revalidatePath("/members");
 }
 
+/** Enable or regenerate the email-intake address token. */
+export async function setInboundToken() {
+  const { tenant } = await requireRole("ADMIN");
+  // short url-safe token (no dashes — the slug uses dashes as the separator)
+  const token = randomUUID().replace(/-/g, "").slice(0, 10);
+  await prisma.tenant.update({ where: { id: tenant.id }, data: { inboundToken: token } });
+  revalidatePath("/members");
+}
+
+/** Disable email intake. */
+export async function disableInboundToken() {
+  const { tenant } = await requireRole("ADMIN");
+  await prisma.tenant.update({ where: { id: tenant.id }, data: { inboundToken: null } });
+  revalidatePath("/members");
+}
+
 export async function addMember(formData: FormData) {
   const { tenant } = await requireRole("ADMIN");
   const name = String(formData.get("name") ?? "").trim();

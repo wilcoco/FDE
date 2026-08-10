@@ -175,6 +175,12 @@ model Tenant {
   /// org identifiers for social-login auto-join (first member from the org binds it)
   googleDomain  String?       @unique
   slackTeamId   String?       @unique
+  /// email intake: secret token in the CC address {slug}-{token}@in.flowdesk.app.
+  /// null = intake disabled. Members CC this to register a mail as a 지시(SAY).
+  inboundToken  String?       @unique
+  /// privacy-by-default: store only email metadata (subject/from/date/reply)
+  /// unless the tenant opts in to storing bodies.
+  storeEmailBody Boolean      @default(false)
   /// last stall-sweep run (lazy sweep throttle)
   lastSweepAt   DateTime?
   createdAt     DateTime      @default(now())
@@ -758,6 +764,7 @@ model AuditLog {
 enum InstructionSource {
   TEXT
   VOICE
+  EMAIL
 }
 
 enum InstructionStatus {
@@ -787,6 +794,9 @@ model Instruction {
   /// spawned from. A milestone owner turns their "do" into their own "say".
   /// Always a NEW instruction — cycles are impossible by construction.
   parentMilestoneId String?
+  /// email intake: Message-ID of the originating mail, so replies (In-Reply-To
+  /// / References) can be matched back to this instruction as DO signals.
+  threadMessageId   String?
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
 
@@ -800,6 +810,7 @@ model Instruction {
   @@index([tenantId])
   @@index([tenantId, createdAt])
   @@index([parentMilestoneId])
+  @@index([tenantId, threadMessageId])
 }
 
 /// A collaboration note on an instruction or a specific milestone (꼭지).

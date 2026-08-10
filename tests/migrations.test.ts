@@ -165,6 +165,21 @@ export async function run(t: (name: string, fn: () => void | Promise<void>) => v
     assert.equal(after.rows[0].n, 0);
   });
 
+  await t("email intake: tenant inbound token + EMAIL-source instruction with thread id", async () => {
+    await db.exec(`
+      UPDATE "Tenant" SET "inboundToken" = 'x7k2ab', "storeEmailBody" = false WHERE id = 't1';
+      INSERT INTO "Instruction" (id, "tenantId", "authorId", "rawText", source, status, "threadMessageId", "updatedAt")
+        VALUES ('i-mail', 't1', 'u-ceo', '[메타데이터만] 견적 받아줘', 'EMAIL', 'ACTIVE', 'msg-1@mail', now());
+    `);
+    const r = await db.query<{ source: string; threadMessageId: string }>(
+      `SELECT source, "threadMessageId" FROM "Instruction" WHERE id = 'i-mail'`,
+    );
+    assert.equal(r.rows[0].source, "EMAIL");
+    assert.equal(r.rows[0].threadMessageId, "msg-1@mail");
+    // inbound token is unique across tenants
+    await assert.rejects(db.exec(`UPDATE "Tenant" SET "inboundToken" = 'x7k2ab' WHERE id = 't2'`));
+  });
+
   await t("deleting an instruction cascades to its milestones", async () => {
     await db.exec(`DELETE FROM "Instruction" WHERE id = 'i1'`);
     const r = await db.query<{ n: number }>(

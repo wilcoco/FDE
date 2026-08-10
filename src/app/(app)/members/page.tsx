@@ -1,7 +1,8 @@
 import { requireContext } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { can } from "@/lib/rbac";
-import { addMember, setMemberStatus, setMemberRole, setJoinLink, disableJoinLink } from "@/app/actions/members";
+import { addMember, setMemberStatus, setMemberRole, setJoinLink, disableJoinLink, setInboundToken, disableInboundToken } from "@/app/actions/members";
+import { inboundAddress } from "@/lib/inbound-email";
 import { createInvitation, revokeInvitation } from "@/app/actions/invitations";
 import { approveJoinRequest, rejectJoinRequest } from "@/app/actions/join-requests";
 
@@ -108,6 +109,24 @@ export default async function MembersPage() {
             )}
             <p className="mt-1 text-xs text-gray-400">
               이 링크를 단톡방 등에 공유하면 누구나 MEMBER로 가입합니다. 유출 시 “재발급”으로 무효화하세요.
+            </p>
+          </div>
+
+          <div className="border-t border-gray-100 pt-4">
+            <h2 className="mb-2 text-sm font-semibold text-gray-700">📧 이메일로 지시 등록 (CC 주소)</h2>
+            {tenant.inboundToken ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <input readOnly value={inboundAddress(tenant.slug, tenant.inboundToken)} className="input flex-1 bg-white font-mono text-xs" />
+                <form action={setInboundToken}><button className="btn-ghost text-xs">재발급</button></form>
+                <form action={disableInboundToken}><button className="text-xs text-gray-400 hover:text-red-600">끄기</button></form>
+              </div>
+            ) : (
+              <form action={setInboundToken}><button className="btn-ghost text-sm">이메일 주소 켜기</button></form>
+            )}
+            <p className="mt-1 text-xs text-gray-400">
+              평소 업무 지시 메일을 보낼 때 이 주소를 <b>참조(CC)</b>에 넣으면 자동으로 지시로 등록됩니다.
+              등록 멤버가 보낸 메일만 처리하며, 답장이 오면 그 지시에 자동 연결됩니다.
+              기본적으로 <b>제목·보낸사람·시각만</b> 저장하고 본문은 저장하지 않습니다.
             </p>
           </div>
 
