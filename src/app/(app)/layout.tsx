@@ -14,10 +14,10 @@ const NAV = [
   { href: "/members", label: "멤버" },
 ];
 
-const NAV_ADVANCED = [
-  { href: "/processes", label: "프로세스 템플릿" },
-  { href: "/instances", label: "프로세스 실행" },
-];
+// Process engine is frozen (DECISIONS.md): routes still exist but are no longer
+// surfaced in the nav — the product leads with the say-do spine, not the
+// 3rd-person process paradigm. Re-add entries here to un-freeze.
+const NAV_ADVANCED: { href: string; label: string }[] = [];
 
 export default async function AppLayout({
   children,

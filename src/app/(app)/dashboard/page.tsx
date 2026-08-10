@@ -31,6 +31,11 @@ export default async function Dashboard() {
       }),
     ]);
 
+  // cold-start: the say-do loop can't close with nobody to delegate to
+  const activeMembers = await prisma.user.count({
+    where: { tenantId: tenant.id, status: "ACTIVE" },
+  });
+
   const myApprovals = myApprovalSteps.filter(
     (s) => s.request.status === "PENDING" && s.request.currentStep === s.order,
   ).length;
@@ -94,6 +99,19 @@ export default async function Dashboard() {
         <div className="text-lg font-semibold">＋ 지시하기</div>
         <div className="mt-1 text-sm text-indigo-100">말하거나 적으면 AI가 굵직한 꼭지로 나눠 실행·추적합니다.</div>
       </Link>
+
+      {/* cold-start nudge: a one-person company has no one to hand work to */}
+      {activeMembers <= 1 && (
+        <Link href="/members" className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50 p-4 transition hover:bg-amber-100">
+          <div>
+            <div className="text-sm font-semibold text-amber-800">👋 팀원을 초대하세요</div>
+            <div className="mt-0.5 text-xs text-amber-700">
+              지시한 일을 맡길 사람이 있어야 &quot;말한 것 → 된 것&quot;이 굴러갑니다. 가입 링크 하나로 팀을 불러오세요.
+            </div>
+          </div>
+          <span className="shrink-0 text-sm text-amber-700">멤버 초대 →</span>
+        </Link>
+      )}
 
       <div className="grid grid-cols-3 gap-4">
         {stats.map((s) => (

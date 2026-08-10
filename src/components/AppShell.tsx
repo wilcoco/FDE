@@ -61,21 +61,23 @@ export default function AppShell({
             </Link>
           );
         })}
-        <div className="mt-3 border-t border-gray-100 pt-3">
-          <div className="px-3 pb-1 text-[10px] font-semibold uppercase text-gray-400">
-            고급 (프로세스 설계)
+        {navAdvanced.length > 0 && (
+          <div className="mt-3 border-t border-gray-100 pt-3">
+            <div className="px-3 pb-1 text-[10px] font-semibold uppercase text-gray-400">
+              고급 (프로세스 설계)
+            </div>
+            {navAdvanced.map((n) => (
+              <Link
+                key={n.href}
+                href={n.href}
+                onClick={close}
+                className="block rounded-md px-3 py-2 text-sm text-gray-500 hover:bg-gray-100"
+              >
+                {n.label}
+              </Link>
+            ))}
           </div>
-          {navAdvanced.map((n) => (
-            <Link
-              key={n.href}
-              href={n.href}
-              onClick={close}
-              className="block rounded-md px-3 py-2 text-sm text-gray-500 hover:bg-gray-100"
-            >
-              {n.label}
-            </Link>
-          ))}
-        </div>
+        )}
       </nav>
       <div className="mt-4 border-t border-gray-100 pt-4">
         <div className="text-sm font-medium text-gray-800">{userName}</div>
