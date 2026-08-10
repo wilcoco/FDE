@@ -25,6 +25,17 @@ export function normalizeEmail(raw: string): string {
 }
 
 /**
+ * Normalize a Message-ID: real mail headers wrap it in angle brackets
+ * (`<abc@host>`), but thread refs are parsed bracket-free. Store and compare
+ * the bare form everywhere or replies never match their SAY.
+ */
+export function normalizeMessageId(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const m = raw.match(/<([^>]+)>/);
+  return (m ? m[1] : raw).trim();
+}
+
+/**
  * Extract candidate parent Message-IDs from reply headers. In-Reply-To is the
  * direct parent; References lists the whole ancestry (last = nearest). We return
  * newest-first so the caller matches the closest known thread.

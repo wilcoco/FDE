@@ -801,11 +801,6 @@ model Instruction {
   counterparty      String?
   /// email intake: when a reply first arrived (open loop closed). null = 답장 대기.
   replyReceivedAt   DateTime?
-  /// account-free counterparty: the mail recipients this SAY is waiting on
-  /// (comma-joined emails). They need no FlowDesk account — their reply is the DO.
-  counterparty      String?
-  /// whether any reply has been recorded on this email thread (DO arrived)
-  replyReceivedAt   DateTime?
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
 

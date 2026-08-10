@@ -4,7 +4,7 @@
  */
 import assert from "node:assert/strict";
 import {
-  inboundAddress, parseInboundAddress, normalizeEmail, extractThreadRefs,
+  inboundAddress, parseInboundAddress, normalizeEmail, normalizeMessageId, extractThreadRefs,
   routeInboundEmail, selectStoredBody, stripQuotedTail, counterpartyOf, type InboundPayload,
 } from "../src/lib/inbound-email";
 
@@ -33,6 +33,31 @@ export async function run(t: (name: string, fn: () => void) => void) {
     const refs = extractThreadRefs({ inReplyTo: "<b@m>", references: "<a@m> <b@m>" });
     assert.equal(refs[0], "b@m"); // nearest ancestor first
     assert.ok(refs.includes("a@m"));
+  });
+
+  t("normalizeMessageId strips angle brackets (real headers carry them)", () => {
+    assert.equal(normalizeMessageId("<abc-123@mail.cohere.com>"), "abc-123@mail.cohere.com");
+    assert.equal(normalizeMessageId("bare-id@host"), "bare-id@host");
+    assert.equal(normalizeMessageId("  <padded@host>  "), "padded@host");
+    assert.equal(normalizeMessageId(null), "");
+    assert.equal(normalizeMessageId(""), "");
+  });
+
+  t("REGRESSION: bracketed Message-ID round-trip — reply must match its SAY", () => {
+    // real mail: SAY registered with messageId from a raw header (brackets),
+    // reply's In-Reply-To parsed bracket-free. Store the bare form or this dies.
+    const stored = normalizeMessageId("<real-say@gmail.com>"); // what the route stores
+    const reply = base({
+      from: "Outsider <partner@vendor.co.kr>",
+      inReplyTo: "<real-say@gmail.com>",
+      references: "<real-say@gmail.com>",
+      messageId: "reply-1@vendor.co.kr",
+    });
+    const d = routeInboundEmail(reply, {
+      tenantExists: true, senderIsMember: false, known: new Set([stored]),
+    });
+    assert.equal(d.action, "reply");
+    assert.equal(d.action === "reply" && d.parentMessageId, "real-say@gmail.com");
   });
 
   const ctxOK = { tenantExists: true, senderIsMember: true, known: new Set<string>() };

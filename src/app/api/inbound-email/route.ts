@@ -2,8 +2,8 @@ import { prisma } from "@/lib/db";
 import { notify, notifyEmail } from "@/lib/notify";
 import { generateMilestones } from "@/lib/ai";
 import {
-  parseInboundAddress, normalizeEmail, extractThreadRefs, routeInboundEmail,
-  selectStoredBody, counterpartyOf, type InboundPayload,
+  parseInboundAddress, normalizeEmail, normalizeMessageId, extractThreadRefs,
+  routeInboundEmail, selectStoredBody, counterpartyOf, type InboundPayload,
 } from "@/lib/inbound-email";
 import type { Prisma } from "@prisma/client";
 
@@ -168,7 +168,8 @@ function normalize(raw: unknown): InboundPayload {
     to,
     from: String(r.from ?? ""),
     subject: String(r.subject ?? ""),
-    messageId: String(r.messageId ?? r.message_id ?? h["message-id"] ?? ""),
+    // bare form (no angle brackets) so stored ids match parsed thread refs
+    messageId: normalizeMessageId(String(r.messageId ?? r.message_id ?? h["message-id"] ?? "")),
     inReplyTo: str(r.inReplyTo ?? r.in_reply_to ?? h["in-reply-to"]),
     references: str(r.references ?? h["references"]),
     text: str(r.text ?? r.body ?? r.plain),
