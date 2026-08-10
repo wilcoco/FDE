@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { requireContext } from "@/lib/session";
 import { prisma } from "@/lib/db";
-import { maybeSweep, attentionSummary } from "@/lib/sweep";
+import { maybeSweep, attentionSummary, openLoops } from "@/lib/sweep";
+import { completeFromReply } from "@/app/actions/capture";
 import type { StrategyResult } from "@/lib/ai";
 
 export default async function Dashboard() {
@@ -35,6 +36,9 @@ export default async function Dashboard() {
   const activeMembers = await prisma.user.count({
     where: { tenantId: tenant.id, status: "ACTIVE" },
   });
+
+  // open loops: email SAYs I'm waiting on (the thing email itself can't show)
+  const loops = await openLoops(tenant.id, user.id);
 
   const myApprovals = myApprovalSteps.filter(
     (s) => s.request.status === "PENDING" && s.request.currentStep === s.order,
@@ -111,6 +115,44 @@ export default async function Dashboard() {
           </div>
           <span className="shrink-0 text-sm text-amber-700">멤버 초대 →</span>
         </Link>
+      )}
+
+      {/* open loops — email SAYs I'm waiting on. What email itself can't show. */}
+      {(loops.replied.length > 0 || loops.awaiting.length > 0) && (
+        <div className="card">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="font-semibold">📧 내가 맡긴 것 — 답 왔나?</h2>
+            <span className="text-xs text-gray-400">이메일로 맡긴 일 {loops.replied.length + loops.awaiting.length}건</span>
+          </div>
+
+          <div className="space-y-2">
+            {loops.replied.map((l) => (
+              <div key={l.id} className="flex items-center justify-between rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2">
+                <Link href={`/instructions/${l.id}`} className="min-w-0 flex-1">
+                  <span className="badge mr-2 bg-emerald-100 text-emerald-700">✉ 답장 도착</span>
+                  <span className="text-sm font-medium">{l.summary}</span>
+                  <span className="ml-2 text-xs text-gray-400">→ {l.counterparty}</span>
+                </Link>
+                <form action={completeFromReply} className="shrink-0">
+                  <input type="hidden" name="instructionId" value={l.id} />
+                  <button className="btn px-3 py-1 text-xs">✅ 완료</button>
+                </form>
+              </div>
+            ))}
+            {loops.awaiting.map((l) => (
+              <Link key={l.id} href={`/instructions/${l.id}`} className="flex items-center justify-between rounded-md border border-gray-100 px-3 py-2 hover:bg-gray-50">
+                <span className="min-w-0 flex-1">
+                  <span className={`badge mr-2 ${l.days >= 3 ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-500"}`}>
+                    답장 대기 {l.days > 0 ? `${l.days}일째` : "오늘"}
+                  </span>
+                  <span className="text-sm">{l.summary}</span>
+                  <span className="ml-2 text-xs text-gray-400">→ {l.counterparty}</span>
+                </span>
+                <span className="shrink-0 text-xs text-indigo-600">열기 →</span>
+              </Link>
+            ))}
+          </div>
+        </div>
       )}
 
       <div className="grid grid-cols-3 gap-4">

@@ -96,6 +96,41 @@ export async function maybeSweep(tenantId: string): Promise<void> {
 }
 
 /** Attention summary for the dashboard card (read-only; no nudging). */
+/**
+ * Open loops I'm carrying: instructions I authored that were handed to an
+ * account-free email counterparty and are still open. The one thing email
+ * itself can't show me — "who did I ask, and did they answer?"
+ */
+export async function openLoops(tenantId: string, userId: string, now = new Date()) {
+  const rows = await prisma.instruction.findMany({
+    where: {
+      tenantId,
+      authorId: userId,
+      status: "ACTIVE",
+      source: "EMAIL",
+      counterparty: { not: null },
+      milestones: { some: { status: { in: ["ACTIVE", "BLOCKED"] } } }, // still open
+    },
+    select: {
+      id: true, summary: true, counterparty: true, replyReceivedAt: true, createdAt: true,
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const dayMs = 86_400_000;
+  const map = (r: (typeof rows)[number]) => ({
+    id: r.id,
+    summary: r.summary ?? "(제목 없음)",
+    counterparty: r.counterparty ?? "",
+    days: Math.floor((now.getTime() - r.createdAt.getTime()) / dayMs),
+  });
+
+  return {
+    replied: rows.filter((r) => r.replyReceivedAt != null).map(map), // 답장 도착 · 확인 필요
+    awaiting: rows.filter((r) => r.replyReceivedAt == null).map(map), // 답장 대기
+  };
+}
+
 export async function attentionSummary(tenantId: string, userId: string, now = new Date()) {
   const milestones = await prisma.milestone.findMany({
     where: {
