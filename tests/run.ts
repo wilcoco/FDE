@@ -30,6 +30,9 @@ async function main() {
   console.log("── collab ──");
   await (await import("./collab.test")).run(t);
 
+  console.log("── objective-progress ──");
+  await (await import("./objective-progress.test")).run(t);
+
   console.log("── migrations (embedded Postgres) ──");
   await (await import("./migrations.test")).run(t);
 

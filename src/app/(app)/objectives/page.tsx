@@ -4,6 +4,7 @@ import { can } from "@/lib/rbac";
 import {
   addObjective, addKeyResult, updateKeyResultProgress, addGoal,
 } from "@/app/actions/objectives";
+import { executionProgress, claimedProgress, sayDoGap } from "@/lib/objective-progress";
 
 const LEVEL_LABEL: Record<string, string> = { COMPANY: "회사", DEPARTMENT: "부서", INDIVIDUAL: "개인" };
 
@@ -11,7 +12,7 @@ export default async function ObjectivesPage() {
   const { tenant, user } = await requireContext();
   const admin = can.manageObjectives(user.role);
 
-  const [objectives, goals, members] = await Promise.all([
+  const [objectives, goals, members, linkedInstructions] = await Promise.all([
     prisma.objective.findMany({
       where: { tenantId: tenant.id },
       include: { keyResults: true, owner: true, parent: true },
@@ -19,7 +20,23 @@ export default async function ObjectivesPage() {
     }),
     prisma.goal.findMany({ where: { tenantId: tenant.id }, include: { objective: true, owner: true, _count: { select: { definitions: true } } } }),
     prisma.user.findMany({ where: { tenantId: tenant.id, status: "ACTIVE" }, orderBy: { name: "asc" } }),
+    // execution side: every instruction tied to an objective, with its milestones
+    prisma.instruction.findMany({
+      where: { tenantId: tenant.id, status: "ACTIVE", objectiveId: { not: null } },
+      select: { id: true, objectiveId: true, milestones: { select: { status: true } } },
+    }),
   ]);
+
+  // roll milestones up per objective
+  const milestonesByObjective = new Map<string, { status: string }[]>();
+  const instrCountByObjective = new Map<string, number>();
+  for (const inst of linkedInstructions) {
+    if (!inst.objectiveId) continue;
+    const arr = milestonesByObjective.get(inst.objectiveId) ?? [];
+    arr.push(...inst.milestones);
+    milestonesByObjective.set(inst.objectiveId, arr);
+    instrCountByObjective.set(inst.objectiveId, (instrCountByObjective.get(inst.objectiveId) ?? 0) + 1);
+  }
 
   return (
     <div className="space-y-8">
@@ -58,6 +75,50 @@ export default async function ObjectivesPage() {
               {o.owner && <span className="ml-auto text-xs text-gray-400">{o.owner.name}</span>}
             </div>
             {o.description && <p className="mt-1 text-sm text-gray-500">{o.description}</p>}
+
+            {(() => {
+              const exec = executionProgress(milestonesByObjective.get(o.id) ?? []);
+              const claim = claimedProgress(o.keyResults);
+              const { gap, severity, direction } = sayDoGap({
+                claimedPct: claim.pct, hasKrs: claim.hasKrs,
+                executionTotal: exec.total, executionPct: exec.pct,
+              });
+              const instrCount = instrCountByObjective.get(o.id) ?? 0;
+              if (exec.total === 0) {
+                return (
+                  <p className="mt-2 text-xs text-gray-400">
+                    연결된 실행(지시)이 없습니다 — 이 목표는 아직 &quot;말&quot;만 있고 실행이 붙지 않았습니다.
+                  </p>
+                );
+              }
+              const gapColor = severity === "alert" ? "text-red-600" : severity === "watch" ? "text-amber-600" : "text-gray-400";
+              return (
+                <div className="mt-3 rounded-md border border-gray-100 bg-gray-50/60 p-3">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium text-gray-600">🔗 실행 진척 (지시 {instrCount}건 · 꼭지 {exec.done}/{exec.total} 완료)</span>
+                    <span className="text-gray-500">{exec.pct}%</span>
+                  </div>
+                  <div className="mt-1 h-2 rounded-full bg-gray-200">
+                    <div className="h-2 rounded-full bg-emerald-500" style={{ width: `${exec.pct}%` }} />
+                  </div>
+                  {(exec.review > 0 || exec.blocked > 0) && (
+                    <p className="mt-1 text-[11px] text-gray-400">
+                      {exec.review > 0 && <span className="text-violet-600">검수 대기 {exec.review} </span>}
+                      {exec.blocked > 0 && <span className="text-red-500">막힘 {exec.blocked}</span>}
+                    </p>
+                  )}
+                  {gap != null && direction !== "even" && (
+                    <p className={`mt-2 text-xs font-medium ${gapColor}`}>
+                      {severity === "alert" ? "🚨 " : severity === "watch" ? "⚠️ " : ""}
+                      Say-Do 격차 {gap > 0 ? "+" : ""}{gap}%p —{" "}
+                      {direction === "over"
+                        ? `보고된 목표 진척(${claim.pct}%)이 실제 실행(${exec.pct}%)보다 앞서 있습니다`
+                        : `실제 실행(${exec.pct}%)이 보고된 목표 진척(${claim.pct}%)보다 앞서 있습니다`}
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
 
             <div className="mt-3 space-y-2">
               {o.keyResults.map((kr) => {
