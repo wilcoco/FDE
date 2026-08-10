@@ -207,6 +207,8 @@ model Tenant {
   syntheses      StrategySynthesis[]
   joinRequests   JoinRequest[]
   milestoneComments MilestoneComment[]
+  dataTables     DataTable[]
+  dataRows       DataRow[]
 }
 
 model User {
@@ -257,6 +259,8 @@ model User {
   decidedJoinRequests  JoinRequest[]       @relation("JoinRequestDecider")
   resetTokens          PasswordResetToken[]
   milestoneComments    MilestoneComment[]  @relation("MilestoneCommentAuthor")
+  dataTables           DataTable[]         @relation("DataTableAuthor")
+  dataRows             DataRow[]           @relation("DataRowAuthor")
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -820,6 +824,48 @@ model MilestoneComment {
   @@index([milestoneId])
 }
 
+/// Structured "do" data captured against a milestone. The reverse-Palantir
+/// engine's real output: instead of a freeform proof blob, work produces a
+/// small, queryable table the org defines. Every row is tied to the milestone
+/// (commitment) that produced it — a 1st-person execution ledger, not 3rd-person
+/// data. v1 scope is deliberately tiny: define columns once, add rows. No
+/// relations, formulas, views, or column editing after creation.
+model DataTable {
+  id          String   @id @default(cuid())
+  tenantId    String
+  milestoneId String
+  name        String
+  /// column defs: [{key:"c0", label:"거래처", type:"text"|"number"|"date"}]
+  columns     Json     @default("[]")
+  createdById String
+  createdAt   DateTime @default(now())
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  milestone Milestone @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("DataTableAuthor", fields: [createdById], references: [id])
+  rows      DataRow[]
+
+  @@index([tenantId])
+  @@index([milestoneId])
+}
+
+/// One row of a DataTable. values keyed by column key: {c0:"OO상사", c1:300}.
+model DataRow {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tableId     String
+  values      Json     @default("{}")
+  createdById String
+  createdAt   DateTime @default(now())
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  table     DataTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("DataRowAuthor", fields: [createdById], references: [id])
+
+  @@index([tenantId])
+  @@index([tableId])
+}
+
 /// A coarse milestone (꼭지) the owner manages: order, owner, expected result,
 /// status, and proof (links/notes/files captured from wherever work happened).
 model Milestone {
@@ -849,6 +895,7 @@ model Milestone {
   owner       User?       @relation("MilestoneOwner", fields: [ownerId], references: [id])
   comments    MilestoneComment[]
   subInstructions Instruction[] @relation("MilestoneSubInstructions")
+  dataTables      DataTable[]
 
   @@index([tenantId])
   @@index([instructionId])

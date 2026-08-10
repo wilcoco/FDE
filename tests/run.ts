@@ -33,6 +33,9 @@ async function main() {
   console.log("── objective-progress ──");
   await (await import("./objective-progress.test")).run(t);
 
+  console.log("── datatable ──");
+  await (await import("./datatable.test")).run(t);
+
   console.log("── migrations (embedded Postgres) ──");
   await (await import("./migrations.test")).run(t);
 

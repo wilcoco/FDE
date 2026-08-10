@@ -6,6 +6,8 @@ import { atLeast } from "@/lib/rbac";
 import { MilestoneFlow, MilestoneBoard, type MilestoneCard } from "@/components/MilestoneViews";
 import CommentThread, { type CommentView } from "@/components/CommentThread";
 import { executionProgress } from "@/lib/objective-progress";
+import DataTables, { type DataTableView } from "@/components/DataTables";
+import type { Column, CellValue } from "@/lib/datatable";
 import {
   updateMilestone, assignMilestoneOwner, setMilestoneStatus, addMilestoneProof,
   addMilestone, deleteMilestone, linkInstructionObjective, archiveInstruction,
@@ -38,6 +40,12 @@ export default async function InstructionDetail({ params }: { params: Promise<{ 
               id: true, summary: true, rawText: true,
               author: { select: { name: true } },
               milestones: { select: { status: true } },
+            },
+          },
+          dataTables: {
+            orderBy: { createdAt: "asc" },
+            include: {
+              rows: { orderBy: { createdAt: "asc" }, include: { createdBy: { select: { name: true } } } },
             },
           },
         },
@@ -268,6 +276,22 @@ export default async function InstructionDetail({ params }: { params: Promise<{ 
                   <button className="btn-ghost text-xs">추가</button>
                 </form>
               </div>
+
+              {/* structured "do" data: user-defined tables */}
+              <DataTables
+                milestoneId={m.id}
+                tables={m.dataTables.map((dt): DataTableView => ({
+                  id: dt.id,
+                  name: dt.name,
+                  columns: (Array.isArray(dt.columns) ? dt.columns : []) as unknown as Column[],
+                  rows: dt.rows.map((r) => ({
+                    id: r.id,
+                    values: (r.values ?? {}) as Record<string, CellValue>,
+                    by: r.createdBy.name,
+                    canDelete: r.createdById === user.id || isAdmin,
+                  })),
+                }))}
+              />
 
               {/* delegation chain: sub-instructions spawned from this milestone */}
               <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">

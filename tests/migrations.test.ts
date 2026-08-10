@@ -147,6 +147,24 @@ export async function run(t: (name: string, fn: () => void | Promise<void>) => v
     assert.equal(after.rows[0].parentMilestoneId, null);
   });
 
+  await t("DataTable/DataRow: structured do-data, cascades with its milestone", async () => {
+    await db.exec(`
+      INSERT INTO "Milestone" (id, "tenantId", "instructionId", "order", title, status, "updatedAt")
+        VALUES ('m-dt', 't1', 'i1', 7, '발송', 'ACTIVE', now());
+      INSERT INTO "DataTable" (id, "tenantId", "milestoneId", name, columns, "createdById")
+        VALUES ('dt1', 't1', 'm-dt', '거래처 발송', '[{"key":"c0","label":"거래처","type":"text"}]', 'u-staff');
+      INSERT INTO "DataRow" (id, "tenantId", "tableId", "values", "createdById")
+        VALUES ('dr1', 't1', 'dt1', '{"c0":"OO상사"}', 'u-staff'),
+               ('dr2', 't1', 'dt1', '{"c0":"XX상사"}', 'u-staff');
+    `);
+    const rows = await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM "DataRow" WHERE "tableId" = 'dt1'`);
+    assert.equal(rows.rows[0].n, 2);
+    // deleting the milestone cascades table + rows
+    await db.exec(`DELETE FROM "Milestone" WHERE id = 'm-dt'`);
+    const after = await db.query<{ n: number }>(`SELECT count(*)::int AS n FROM "DataRow" WHERE "tableId" = 'dt1'`);
+    assert.equal(after.rows[0].n, 0);
+  });
+
   await t("deleting an instruction cascades to its milestones", async () => {
     await db.exec(`DELETE FROM "Instruction" WHERE id = 'i1'`);
     const r = await db.query<{ n: number }>(
