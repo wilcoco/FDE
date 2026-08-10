@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import {
   inboundAddress, parseInboundAddress, normalizeEmail, extractThreadRefs,
-  routeInboundEmail, selectStoredBody, stripQuotedTail, type InboundPayload,
+  routeInboundEmail, selectStoredBody, stripQuotedTail, counterpartyOf, type InboundPayload,
 } from "../src/lib/inbound-email";
 
 const base = (over: Partial<InboundPayload> = {}): InboundPayload => ({
@@ -93,6 +93,19 @@ export async function run(t: (name: string, fn: () => void) => void) {
       { ...ctxOK, known: new Set(["other@mail"]) },
     );
     assert.equal(d.action, "create"); // referenced id not tracked → new SAY
+  });
+
+  t("counterpartyOf: recipients minus our address and the sender", () => {
+    const cp = counterpartyOf(
+      ["vendor@partner.co.kr", "acme-x7k2ab@in.flowdesk.app", "CEO@acme.com", "vendor@partner.co.kr"],
+      "김대표 <ceo@acme.com>",
+    );
+    assert.equal(cp, "vendor@partner.co.kr"); // intake addr + self + dup removed
+  });
+
+  t("counterpartyOf: multiple distinct recipients joined", () => {
+    const cp = counterpartyOf(["a@x.com", "b@y.com", "acme-t@in.flowdesk.app"], "me@acme.com");
+    assert.equal(cp, "a@x.com, b@y.com");
   });
 
   t("selectStoredBody: withheld unless opted in", () => {

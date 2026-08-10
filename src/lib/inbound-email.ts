@@ -97,6 +97,25 @@ export function routeInboundEmail(
   return { action: "create", slug: addr.slug };
 }
 
+/**
+ * The account-free counterparty of a SAY: the recipients the mail was sent to,
+ * excluding our own inbound address and the sender themselves. These are the
+ * people whose reply will be the DO — they need no account.
+ */
+export function counterpartyOf(to: string[], sender: string): string {
+  const senderNorm = normalizeEmail(sender);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of to) {
+    if (/@in\.flowdesk\.app/i.test(raw)) continue; // our intake address
+    const e = normalizeEmail(raw);
+    if (!e || e === senderNorm || seen.has(e)) continue;
+    seen.add(e);
+    out.push(e);
+  }
+  return out.join(", ");
+}
+
 /** Metadata always kept; body only when the tenant opted in. */
 export function selectStoredBody(rawText: string | null | undefined, storeBody: boolean): string {
   if (!storeBody) return "";

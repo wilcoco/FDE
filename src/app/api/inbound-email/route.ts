@@ -3,7 +3,7 @@ import { notify, notifyEmail } from "@/lib/notify";
 import { generateMilestones } from "@/lib/ai";
 import {
   parseInboundAddress, normalizeEmail, extractThreadRefs, routeInboundEmail,
-  selectStoredBody, type InboundPayload,
+  selectStoredBody, counterpartyOf, type InboundPayload,
 } from "@/lib/inbound-email";
 import type { Prisma } from "@prisma/client";
 
@@ -69,6 +69,11 @@ export async function POST(req: Request) {
     const parent = knownRows.find((r) => r.threadMessageId === decision.parentMessageId)!;
     const body = selectStoredBody(p.text, tenant!.storeEmailBody);
     const preview = body ? ` — ${body.slice(0, 120)}` : "";
+    // stamp the open loop as answered (mirror: surfaces, doesn't auto-complete)
+    await prisma.instruction.update({
+      where: { id: parent.id },
+      data: { replyReceivedAt: new Date() },
+    });
     // record the reply as a note on the instruction thread (author = system view)
     await prisma.milestoneComment.create({
       data: {
@@ -114,6 +119,7 @@ export async function POST(req: Request) {
         summary,
         source: "EMAIL",
         threadMessageId: p.messageId,
+        counterparty: counterpartyOf(p.to, p.from) || null,
       },
     });
     await tx.milestone.createMany({

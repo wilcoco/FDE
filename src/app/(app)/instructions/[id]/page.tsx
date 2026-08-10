@@ -105,7 +105,21 @@ export default async function InstructionDetail({ params }: { params: Promise<{ 
             </p>
           )}
           <h1 className="mt-1 text-2xl font-bold">{inst.summary || "지시"}</h1>
-          <p className="mt-1 text-sm text-gray-500">{inst.author.name} 지시 · {new Date(inst.createdAt).toLocaleString()}</p>
+          <p className="mt-1 text-sm text-gray-500">
+            {inst.author.name} 지시 · {new Date(inst.createdAt).toLocaleString()}
+            {inst.source === "EMAIL" && <span className="badge ml-2 bg-sky-100 text-sky-700">📧 이메일</span>}
+          </p>
+          {inst.counterparty && (
+            <p className="mt-1 text-sm">
+              <span className="text-gray-500">대기 중인 상대(계정 불필요): </span>
+              <span className="font-medium text-gray-800">{inst.counterparty}</span>
+              {inst.replyReceivedAt ? (
+                <span className="badge ml-2 bg-emerald-100 text-emerald-700">✉ 답장 도착 · 확인 필요</span>
+              ) : (
+                <span className="badge ml-2 bg-amber-100 text-amber-700">답장 대기</span>
+              )}
+            </p>
+          )}
         </div>
         <form action={linkInstructionObjective} className="flex items-center gap-1">
           <input type="hidden" name="id" value={inst.id} />
