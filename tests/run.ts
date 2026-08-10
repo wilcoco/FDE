@@ -39,6 +39,9 @@ async function main() {
   console.log("── inbound-email ──");
   await (await import("./inbound-email.test")).run(t);
 
+  console.log("── connector ──");
+  await (await import("./connector.test")).run(t);
+
   console.log("── migrations (embedded Postgres) ──");
   await (await import("./migrations.test")).run(t);
 

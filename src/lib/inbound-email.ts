@@ -84,14 +84,16 @@ export function routeInboundEmail(
   // anti-spoof: authentication verdicts must not be a hard fail when present
   if (p.spf && p.spf.toLowerCase() === "fail") return { action: "reject", reason: "spf_fail" };
   if (p.dkim && p.dkim.toLowerCase() === "fail") return { action: "reject", reason: "dkim_fail" };
-  // only registered members may register instructions (prevents outsiders
-  // injecting SAYs via the address)
-  if (!ctx.senderIsMember) return { action: "reject", reason: "sender_not_member" };
 
-  // reply? match the nearest known ancestor
+  // reply? match the nearest known ancestor. Replies are accepted from ANYONE
+  // (most DOs come from outsiders — 거래처 답장); possession of the tracked
+  // thread reference + the secret address is the authorization.
   for (const ref of extractThreadRefs({ inReplyTo: p.inReplyTo, references: p.references })) {
     if (ctx.known.has(ref)) return { action: "reply", slug: addr.slug, parentMessageId: ref };
   }
+
+  // creating a NEW instruction (SAY) is member-only — outsiders can't inject
+  if (!ctx.senderIsMember) return { action: "reject", reason: "sender_not_member" };
   return { action: "create", slug: addr.slug };
 }
 

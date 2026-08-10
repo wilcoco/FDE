@@ -71,6 +71,22 @@ export async function run(t: (name: string, fn: () => void) => void) {
     assert.deepEqual(d, { action: "reply", slug: "acme", parentMessageId: "msg-1@mail" });
   });
 
+  t("reply from an OUTSIDER (거래처) is accepted when the thread matches", () => {
+    const d = routeInboundEmail(
+      base({ from: "거래처 <vendor@partner.co.kr>", inReplyTo: "<msg-1@mail>" }),
+      { ...ctxOK, senderIsMember: false, known: new Set(["msg-1@mail"]) },
+    );
+    assert.equal(d.action, "reply"); // DO from outside the org — the common case
+  });
+
+  t("outsider still cannot CREATE a new instruction", () => {
+    const d = routeInboundEmail(
+      base({ from: "거래처 <vendor@partner.co.kr>" }),
+      { ...ctxOK, senderIsMember: false },
+    );
+    assert.equal(d.action === "reject" && d.reason, "sender_not_member");
+  });
+
   t("reply matching precedes create even with a thread present but unknown", () => {
     const d = routeInboundEmail(
       base({ references: "<unknown@mail>" }),
