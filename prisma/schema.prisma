@@ -797,6 +797,10 @@ model Instruction {
   /// email intake: Message-ID of the originating mail, so replies (In-Reply-To
   /// / References) can be matched back to this instruction as DO signals.
   threadMessageId   String?
+  /// email intake: who the SAY was sent to (account-free counterparty).
+  counterparty      String?
+  /// email intake: when a reply first arrived (open loop closed). null = 답장 대기.
+  replyReceivedAt   DateTime?
   /// account-free counterparty: the mail recipients this SAY is waiting on
   /// (comma-joined emails). They need no FlowDesk account — their reply is the DO.
   counterparty      String?

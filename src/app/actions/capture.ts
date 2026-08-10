@@ -244,6 +244,44 @@ export async function setMilestoneStatus(formData: FormData) {
   revalidatePath("/inbox");
 }
 
+/**
+ * One-click close for an email instruction: the author, seeing a reply arrived,
+ * marks the active milestone DONE. The counterparty is an account-free email
+ * recipient (can't submit through the review gate), so the asker closes their
+ * own open loop — the mirror principle applied to email.
+ */
+export async function completeFromReply(formData: FormData) {
+  const { tenant, user } = await requireContext();
+  const instructionId = String(formData.get("instructionId") ?? "");
+  const inst = await prisma.instruction.findFirst({
+    where: { id: instructionId, tenantId: tenant.id },
+    select: { id: true, authorId: true },
+  });
+  if (!inst) return;
+  if (inst.authorId !== user.id && !atLeast(user.role, "ADMIN")) return;
+
+  const m = await prisma.milestone.findFirst({
+    where: { tenantId: tenant.id, instructionId, status: { in: ["ACTIVE", "BLOCKED"] } },
+    orderBy: { order: "asc" },
+  });
+  if (!m) return; // nothing open to close
+
+  await prisma.$transaction(async (tx) => {
+    await tx.milestone.update({
+      where: { id: m.id },
+      data: { status: "DONE", doneAt: new Date(), returnNote: null },
+    });
+    await activateNext(tx, tenant.id, m);
+    await tx.auditLog.create({
+      data: { tenantId: tenant.id, actorId: user.id, action: "MILESTONE_DONE_FROM_REPLY", target: m.id },
+    });
+  });
+
+  revalidatePath(`/instructions/${instructionId}`);
+  revalidatePath("/inbox");
+  revalidatePath("/dashboard");
+}
+
 /** Author/admin confirms a submitted milestone: REVIEW → DONE (+ next starts). */
 export async function approveMilestone(formData: FormData) {
   const { tenant, user } = await requireContext();

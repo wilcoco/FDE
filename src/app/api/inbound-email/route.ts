@@ -97,6 +97,16 @@ export async function POST(req: Request) {
   }
 
   // ─── new mail → SAY (Instruction) ───
+  // idempotency: inbound services retry webhooks, so the same Message-ID may
+  // arrive more than once — never register the same mail twice.
+  if (p.messageId) {
+    const dup = await prisma.instruction.findFirst({
+      where: { tenantId: tenant!.id, threadMessageId: p.messageId },
+      select: { id: true },
+    });
+    if (dup) return ok("duplicate_ignored");
+  }
+
   const body = selectStoredBody(p.text, tenant!.storeEmailBody);
   // decompose into milestones from the body when we have one; otherwise a single
   // milestone from the subject (metadata-only mode).

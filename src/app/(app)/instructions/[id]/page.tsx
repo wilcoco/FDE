@@ -11,7 +11,7 @@ import type { Column, CellValue } from "@/lib/datatable";
 import {
   updateMilestone, assignMilestoneOwner, setMilestoneStatus, addMilestoneProof,
   addMilestone, deleteMilestone, linkInstructionObjective, archiveInstruction,
-  regenerateInstruction, approveMilestone, returnMilestone,
+  regenerateInstruction, approveMilestone, returnMilestone, completeFromReply,
 } from "@/app/actions/capture";
 import SubmitButton from "@/components/SubmitButton";
 
@@ -110,15 +110,21 @@ export default async function InstructionDetail({ params }: { params: Promise<{ 
             {inst.source === "EMAIL" && <span className="badge ml-2 bg-sky-100 text-sky-700">📧 이메일</span>}
           </p>
           {inst.counterparty && (
-            <p className="mt-1 text-sm">
-              <span className="text-gray-500">대기 중인 상대(계정 불필요): </span>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-gray-500">대기 중인 상대(계정 불필요):</span>
               <span className="font-medium text-gray-800">{inst.counterparty}</span>
               {inst.replyReceivedAt ? (
-                <span className="badge ml-2 bg-emerald-100 text-emerald-700">✉ 답장 도착 · 확인 필요</span>
+                <span className="badge bg-emerald-100 text-emerald-700">✉ 답장 도착 · 확인 필요</span>
               ) : (
-                <span className="badge ml-2 bg-amber-100 text-amber-700">답장 대기</span>
+                <span className="badge bg-amber-100 text-amber-700">답장 대기</span>
               )}
-            </p>
+              {canConfirm && inst.milestones.some((m) => m.status === "ACTIVE" || m.status === "BLOCKED") && (
+                <form action={completeFromReply}>
+                  <input type="hidden" name="instructionId" value={inst.id} />
+                  <button className="btn px-3 py-1 text-xs">✅ 이 답장으로 완료</button>
+                </form>
+              )}
+            </div>
           )}
         </div>
         <form action={linkInstructionObjective} className="flex items-center gap-1">
