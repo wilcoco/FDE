@@ -128,6 +128,25 @@ export async function run(t: (name: string, fn: () => void | Promise<void>) => v
     assert.equal(r.rows[0].n, 2);
   });
 
+  await t("delegation chain: sub-instruction links to parent milestone, survives its deletion", async () => {
+    await db.exec(`
+      INSERT INTO "Milestone" (id, "tenantId", "instructionId", "order", title, status, "updatedAt")
+        VALUES ('m-del', 't1', 'i1', 5, '위임될 꼭지', 'ACTIVE', now());
+      INSERT INTO "Instruction" (id, "tenantId", "authorId", "rawText", source, status, "parentMilestoneId", "updatedAt")
+        VALUES ('i-sub', 't1', 'u-staff', '하위 지시', 'TEXT', 'ACTIVE', 'm-del', now());
+    `);
+    const linked = await db.query<{ parentMilestoneId: string | null }>(
+      `SELECT "parentMilestoneId" FROM "Instruction" WHERE id = 'i-sub'`,
+    );
+    assert.equal(linked.rows[0].parentMilestoneId, "m-del");
+    // deleting the parent milestone must PROMOTE the sub-instruction, not destroy it
+    await db.exec(`DELETE FROM "Milestone" WHERE id = 'm-del'`);
+    const after = await db.query<{ parentMilestoneId: string | null }>(
+      `SELECT "parentMilestoneId" FROM "Instruction" WHERE id = 'i-sub'`,
+    );
+    assert.equal(after.rows[0].parentMilestoneId, null);
+  });
+
   await t("deleting an instruction cascades to its milestones", async () => {
     await db.exec(`DELETE FROM "Instruction" WHERE id = 'i1'`);
     const r = await db.query<{ n: number }>(

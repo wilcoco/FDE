@@ -779,17 +779,23 @@ model Instruction {
   source    InstructionSource @default(TEXT)
   status    InstructionStatus @default(ACTIVE)
   objectiveId String? // optional link to a strategic objective
+  /// delegation chain (다층 say-do): the parent milestone this instruction was
+  /// spawned from. A milestone owner turns their "do" into their own "say".
+  /// Always a NEW instruction — cycles are impossible by construction.
+  parentMilestoneId String?
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
 
   tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   author     User        @relation("InstructionAuthor", fields: [authorId], references: [id])
   objective  Objective?  @relation(fields: [objectiveId], references: [id])
+  parentMilestone Milestone? @relation("MilestoneSubInstructions", fields: [parentMilestoneId], references: [id], onDelete: SetNull)
   milestones Milestone[]
   comments   MilestoneComment[]
 
   @@index([tenantId])
   @@index([tenantId, createdAt])
+  @@index([parentMilestoneId])
 }
 
 /// A collaboration note on an instruction or a specific milestone (꼭지).
@@ -842,6 +848,7 @@ model Milestone {
   instruction Instruction @relation(fields: [instructionId], references: [id], onDelete: Cascade)
   owner       User?       @relation("MilestoneOwner", fields: [ownerId], references: [id])
   comments    MilestoneComment[]
+  subInstructions Instruction[] @relation("MilestoneSubInstructions")
 
   @@index([tenantId])
   @@index([instructionId])

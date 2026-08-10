@@ -77,6 +77,7 @@ const TYPE_TO_CATEGORY: Record<string, string> = {
   DIRECTIVE: "decision",
   MILESTONE_NUDGE: "nudge",
   PROOF_ADDED: "activity",
+  DELEGATED: "activity",
   COMMENT_NEW: "comment",
   COMMENT_MENTION: "comment",
   APPROVAL_REQUEST: "approval",

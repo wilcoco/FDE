@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { atLeast } from "@/lib/rbac";
 import { MilestoneFlow, MilestoneBoard, type MilestoneCard } from "@/components/MilestoneViews";
 import CommentThread, { type CommentView } from "@/components/CommentThread";
+import { executionProgress } from "@/lib/objective-progress";
 import {
   updateMilestone, assignMilestoneOwner, setMilestoneStatus, addMilestoneProof,
   addMilestone, deleteMilestone, linkInstructionObjective, archiveInstruction,
@@ -22,7 +23,26 @@ export default async function InstructionDetail({ params }: { params: Promise<{ 
     include: {
       author: true,
       objective: true,
-      milestones: { include: { owner: true }, orderBy: { order: "asc" } },
+      parentMilestone: {
+        select: {
+          id: true, title: true,
+          instruction: { select: { id: true, summary: true, author: { select: { name: true } } } },
+        },
+      },
+      milestones: {
+        include: {
+          owner: true,
+          subInstructions: {
+            where: { status: "ACTIVE" },
+            select: {
+              id: true, summary: true, rawText: true,
+              author: { select: { name: true } },
+              milestones: { select: { status: true } },
+            },
+          },
+        },
+        orderBy: { order: "asc" },
+      },
     },
   });
   if (!inst) notFound();
@@ -67,6 +87,15 @@ export default async function InstructionDetail({ params }: { params: Promise<{ 
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <Link href="/instructions" className="text-sm text-gray-400 hover:underline">← 지시 목록</Link>
+          {inst.parentMilestone && (
+            <p className="mt-1 text-xs text-gray-500">
+              ↰ 상위:{" "}
+              <Link href={`/instructions/${inst.parentMilestone.instruction.id}`} className="text-indigo-600 hover:underline">
+                {inst.parentMilestone.instruction.summary ?? "상위 지시"}
+              </Link>
+              <span className="text-gray-400"> 의 꼭지 “{inst.parentMilestone.title}” ({inst.parentMilestone.instruction.author.name})</span>
+            </p>
+          )}
           <h1 className="mt-1 text-2xl font-bold">{inst.summary || "지시"}</h1>
           <p className="mt-1 text-sm text-gray-500">{inst.author.name} 지시 · {new Date(inst.createdAt).toLocaleString()}</p>
         </div>
@@ -238,6 +267,31 @@ export default async function InstructionDetail({ params }: { params: Promise<{ 
                   <input name="value" placeholder="결과물 링크 또는 메모" className="input text-sm" />
                   <button className="btn-ghost text-xs">추가</button>
                 </form>
+              </div>
+
+              {/* delegation chain: sub-instructions spawned from this milestone */}
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                {m.subInstructions.map((sub) => {
+                  const p = executionProgress(sub.milestones);
+                  return (
+                    <Link
+                      key={sub.id}
+                      href={`/instructions/${sub.id}`}
+                      className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-indigo-700 hover:bg-indigo-100"
+                    >
+                      ⤵ {sub.summary ?? sub.rawText.slice(0, 30)} — 꼭지 {p.done}/{p.total}
+                      <span className="ml-1 text-indigo-400">({sub.author.name})</span>
+                    </Link>
+                  );
+                })}
+                {m.status !== "DONE" && (
+                  <Link
+                    href={`/capture?from=${m.id}`}
+                    className="rounded-full border border-dashed border-gray-300 px-2.5 py-1 text-gray-500 hover:border-indigo-300 hover:text-indigo-600"
+                  >
+                    ⤵ 하위 지시로 분해
+                  </Link>
+                )}
               </div>
 
               {/* per-milestone collaboration thread */}

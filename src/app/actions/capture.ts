@@ -17,6 +17,18 @@ export async function captureInstruction(formData: FormData) {
   const rawText = String(formData.get("rawText") ?? "").trim();
   if (!rawText) redirect("/capture?error=empty");
 
+  // delegation chain: this instruction may be spawned FROM a milestone the
+  // current user is executing — their "do" becomes their own "say" downward.
+  const parentMilestoneId = String(formData.get("parentMilestoneId") ?? "") || null;
+  let parent: { id: string; title: string; instruction: { authorId: string; id: string } } | null = null;
+  if (parentMilestoneId) {
+    parent = await prisma.milestone.findFirst({
+      where: { id: parentMilestoneId, tenantId: tenant.id },
+      select: { id: true, title: true, instruction: { select: { authorId: true, id: true } } },
+    });
+    if (!parent) redirect("/capture?error=parent");
+  }
+
   const gen = await generateMilestones(rawText);
 
   const instruction = await prisma.$transaction(async (tx) => {
@@ -27,6 +39,7 @@ export async function captureInstruction(formData: FormData) {
         rawText,
         summary: gen.summary,
         source: "TEXT",
+        parentMilestoneId: parent?.id ?? null,
       },
     });
     await tx.milestone.createMany({
@@ -46,6 +59,19 @@ export async function captureInstruction(formData: FormData) {
     });
     return inst;
   });
+
+  // upstream visibility: tell the parent instruction's author their milestone
+  // was broken down further (mirror, not control — no approval required)
+  if (parent && parent.instruction.authorId !== user.id) {
+    const entry = {
+      tenantId: tenant.id, userId: parent.instruction.authorId, type: "DELEGATED",
+      title: `⤵ 꼭지가 하위 지시로 분해되었습니다: ${parent.title}`,
+      body: `${user.name}: ${gen.summary ?? rawText.slice(0, 80)}`,
+      link: `/instructions/${instruction.id}`,
+    };
+    await notify(prisma, entry);
+    void notifyEmail(entry).catch(() => {});
+  }
 
   // strategic coherence: re-synthesize in the background every few instructions
   void maybeAutoSynthesize(tenant.id, user.id);
