@@ -16,6 +16,8 @@ export default function SignupPage() {
       </div>
       <p className="mt-4 text-center text-sm text-gray-500">
         이미 계정이 있나요? <Link href="/login" className="text-indigo-600">로그인</Link>
+        <span className="mx-2 text-gray-300">·</span>
+        <Link href="/privacy" className="text-gray-400 hover:text-indigo-600">개인정보처리방침</Link>
       </p>
     </main>
   );

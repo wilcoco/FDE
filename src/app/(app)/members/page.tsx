@@ -166,6 +166,18 @@ export default async function MembersPage() {
         </div>
       )}
 
+      {admin && (
+        <div className="card flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-700">회사 데이터 내보내기</h2>
+            <p className="mt-0.5 text-xs text-gray-400">
+              지시·꼭지·증빙·데이터 표·목표 전체를 JSON으로 다운로드합니다. 데이터는 언제나 귀사의 것입니다.
+            </p>
+          </div>
+          <a href="/api/export" className="btn-ghost text-sm" download>⬇ JSON 내보내기</a>
+        </div>
+      )}
+
       <div className="card overflow-x-auto p-0">
         <table className="w-full min-w-[560px]">
           <thead className="border-b border-gray-200 bg-gray-50">
