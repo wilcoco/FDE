@@ -45,6 +45,12 @@ async function main() {
   console.log("── crypto ──");
   await (await import("./crypto.test")).run(t);
 
+  console.log("── mail-headers ──");
+  await (await import("./mail-headers.test")).run(t);
+
+  console.log("── pop3 ──");
+  await (await import("./pop3.test")).run(t);
+
   console.log("── migrations (embedded Postgres) ──");
   await (await import("./migrations.test")).run(t);
 

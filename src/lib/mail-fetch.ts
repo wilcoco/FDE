@@ -4,6 +4,8 @@
 
 import { ImapFlow } from "imapflow";
 import { pickSentMailbox, type MailEnvelope } from "./connector";
+import { pop3Test, pop3ListRecent, pop3FetchRaw } from "./pop3";
+import { headersToEnvelope, extractTextBody } from "./mail-headers";
 
 export interface ImapConn {
   host: string;
@@ -17,6 +19,16 @@ export interface ImapConn {
 export interface ListedMail extends MailEnvelope {
   seq: number;
   mailbox: string;
+  /** POP3 UIDL — stable across sessions (POP3 seq numbers are not). */
+  uid?: string;
+}
+
+/**
+ * Protocol by port: 995/110 = POP3 (Nmail 등 국산 POP3-전용 서버),
+ * everything else = IMAP. Keeps the setup form to a single "포트" field.
+ */
+export function protocolFor(port: number): "imap" | "pop3" {
+  return port === 995 || port === 110 ? "pop3" : "imap";
 }
 
 /** 993 = implicit TLS (IMAPS); anything else (143 등) = plaintext + STARTTLS upgrade. */
@@ -52,8 +64,13 @@ export function classifyConnError(e: unknown): ConnFailure {
   return "other";
 }
 
+function pop3ConnOf(conn: ImapConn) {
+  return { host: conn.host, port: conn.port, user: conn.login?.trim() || conn.email, pass: conn.pass };
+}
+
 /** Verify credentials by connecting and logging out. Throws on failure. */
 export async function testConnection(conn: ImapConn): Promise<void> {
+  if (protocolFor(conn.port) === "pop3") return pop3Test(pop3ConnOf(conn));
   const c = client(conn);
   await c.connect();
   await c.logout();
@@ -89,8 +106,24 @@ async function fetchRecent(c: ImapFlow, mailbox: string, n: number): Promise<Lis
   }
 }
 
-/** Recent sent mail (my SAYs waiting out there) — metadata only. */
+/** POP3: recent inbox headers → ListedMail (metadata-only at protocol level). */
+async function pop3Recent(conn: ImapConn, n: number): Promise<ListedMail[]> {
+  const mails = await pop3ListRecent(pop3ConnOf(conn), n);
+  return mails.map((m) => ({
+    ...headersToEnvelope(m.rawHeaders, `pop3-${m.uid}`),
+    seq: m.seq,
+    uid: m.uid,
+    mailbox: "INBOX",
+  }));
+}
+
+/**
+ * Recent sent mail (my SAYs waiting out there) — metadata only.
+ * POP3 has no sent folder; the inbox stands in (self-BCC workflow) and the
+ * page explains the habit.
+ */
 export async function listRecentSent(conn: ImapConn, n = 20): Promise<ListedMail[]> {
+  if (protocolFor(conn.port) === "pop3") return pop3Recent(conn, n);
   const c = client(conn);
   await c.connect();
   try {
@@ -105,6 +138,7 @@ export async function listRecentSent(conn: ImapConn, n = 20): Promise<ListedMail
 
 /** Recent inbox mail — used to detect replies to tracked threads. */
 export async function listRecentInbox(conn: ImapConn, n = 30): Promise<ListedMail[]> {
+  if (protocolFor(conn.port) === "pop3") return pop3Recent(conn, n);
   const c = client(conn);
   await c.connect();
   try {
@@ -115,7 +149,12 @@ export async function listRecentInbox(conn: ImapConn, n = 30): Promise<ListedMai
 }
 
 /** Body of one specific mail — fetched ONLY on per-mail opt-in. */
-export async function fetchBody(conn: ImapConn, mailbox: string, seq: number): Promise<string> {
+export async function fetchBody(conn: ImapConn, mailbox: string, seq: number, uid?: string): Promise<string> {
+  if (protocolFor(conn.port) === "pop3") {
+    if (!uid) return "";
+    const raw = await pop3FetchRaw(pop3ConnOf(conn), uid);
+    return raw ? extractTextBody(raw) : "";
+  }
   const c = client(conn);
   await c.connect();
   try {

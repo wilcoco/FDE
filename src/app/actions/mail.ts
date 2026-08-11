@@ -75,6 +75,7 @@ export async function registerMailAsSay(formData: FormData) {
   const toRaw = String(formData.get("to") ?? "");
   const mailbox = String(formData.get("mailbox") ?? "");
   const seq = Number(formData.get("seq") ?? 0);
+  const uid = String(formData.get("uid") ?? "") || undefined;
   const withBody = formData.get("withBody") === "1";
   if (!messageId) redirect("/mail?error=nomsgid");
 
@@ -93,8 +94,8 @@ export async function registerMailAsSay(formData: FormData) {
   const selfEmail = conn?.email ?? user.email;
 
   let body = "";
-  if (withBody && mailbox && seq > 0 && conn) {
-    body = stripQuotedTail(await fetchBody(conn, mailbox, seq).catch(() => ""));
+  if (withBody && conn && (uid || (mailbox && seq > 0))) {
+    body = stripQuotedTail(await fetchBody(conn, mailbox, seq, uid).catch(() => ""));
   }
 
   let summary = subject;

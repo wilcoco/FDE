@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireContext } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { loadMailConn } from "@/lib/mail-conn";
-import { listRecentSent, type ListedMail } from "@/lib/mail-fetch";
+import { listRecentSent, protocolFor, type ListedMail } from "@/lib/mail-fetch";
 import {
   saveMailConnection, deleteMailConnection, registerMailAsSay, syncReplies,
 } from "@/app/actions/mail";
@@ -103,7 +103,8 @@ export default async function MailPage({
     );
   }
 
-  // ── connected: fetch sent mail NOW (because the user opened this screen) ──
+  // ── connected: fetch mail NOW (because the user opened this screen) ──
+  const isPop3 = protocolFor(conn.port) === "pop3";
   let mails: ListedMail[] = [];
   let fetchError: string | null = null;
   try {
@@ -128,7 +129,9 @@ export default async function MailPage({
         <div>
           <h1 className="text-2xl font-bold">📧 메일 → 지시</h1>
           <p className="mt-1 text-sm text-gray-500">
-            {conn.email}의 최근 보낸 메일. 맡긴 일을 지시로 등록하면 답장이 DO로 잡힙니다.
+            {isPop3
+              ? `${conn.email}의 받은편지함 (POP3). 맡긴 일을 지시로 등록하면 답장이 DO로 잡힙니다.`
+              : `${conn.email}의 최근 보낸 메일. 맡긴 일을 지시로 등록하면 답장이 DO로 잡힙니다.`}
           </p>
         </div>
         <form action={deleteMailConnection}>
@@ -144,6 +147,14 @@ export default async function MailPage({
       )}
       {error === "noconn" && (
         <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">메일 연결이 없습니다.</div>
+      )}
+
+      {isPop3 && (
+        <div className="rounded-md border border-sky-200 bg-sky-50 p-3 text-xs leading-5 text-sky-800">
+          <b>POP3 모드</b> — 이 서버는 받은편지함만 읽을 수 있습니다. 맡기는 메일을 여기서 등록하려면{" "}
+          <b>보낼 때 숨은참조(BCC)에 {conn.email}</b>을 넣으세요. 그러면 그 메일이 아래 목록에 떠서
+          지시로 등록할 수 있고, 상대 답장도 자동으로 잡힙니다.
+        </div>
       )}
 
       <div className="flex items-center justify-between">
@@ -194,6 +205,7 @@ export default async function MailPage({
                     <input type="hidden" name="to" value={to} />
                     <input type="hidden" name="mailbox" value={m.mailbox} />
                     <input type="hidden" name="seq" value={m.seq} />
+                    <input type="hidden" name="uid" value={m.uid ?? ""} />
                     <button className="btn px-2 py-1 text-xs" title="제목·받는사람만 저장">지시로 등록</button>
                   </form>
                   <form action={registerMailAsSay}>
@@ -202,6 +214,7 @@ export default async function MailPage({
                     <input type="hidden" name="to" value={to} />
                     <input type="hidden" name="mailbox" value={m.mailbox} />
                     <input type="hidden" name="seq" value={m.seq} />
+                    <input type="hidden" name="uid" value={m.uid ?? ""} />
                     <input type="hidden" name="withBody" value="1" />
                     <button
                       className="rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-500 hover:bg-gray-50"
