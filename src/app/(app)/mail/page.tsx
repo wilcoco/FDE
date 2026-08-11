@@ -28,10 +28,13 @@ export const dynamic = "force-dynamic";
 export default async function MailPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; synced?: string; why?: string }>;
+  searchParams: Promise<{
+    error?: string; synced?: string; why?: string;
+    host?: string; port?: string; email?: string; login?: string; // echoed back on failure
+  }>;
 }) {
   const { tenant, user } = await requireContext();
-  const { error, synced, why } = await searchParams;
+  const { error, synced, why, host: prevHost, port: prevPort, email: prevEmail, login: prevLogin } = await searchParams;
   const conn = await loadMailConn(user.id);
 
   // ── not connected yet: setup ──
@@ -66,22 +69,22 @@ export default async function MailPage({
           <div className="grid grid-cols-[1fr_7rem] gap-3">
             <label className="block">
               <span className="text-sm font-medium">IMAP 서버</span>
-              <input name="host" placeholder="imap.naver.com" className="input mt-1 w-full" required />
+              <input name="host" placeholder="imap.naver.com" defaultValue={prevHost ?? ""} className="input mt-1 w-full" required />
             </label>
             <label className="block">
               <span className="text-sm font-medium">포트</span>
-              <input name="port" type="number" defaultValue={993} className="input mt-1 w-full" />
+              <input name="port" type="number" defaultValue={prevPort ?? 993} className="input mt-1 w-full" />
             </label>
           </div>
           <label className="block">
             <span className="text-sm font-medium">이메일 주소</span>
-            <input name="email" type="email" placeholder="me@naver.com" className="input mt-1 w-full" required />
+            <input name="email" type="email" placeholder="me@naver.com" defaultValue={prevEmail ?? ""} className="input mt-1 w-full" required />
           </label>
           <label className="block">
             <span className="text-sm font-medium">
               로그인 아이디 <span className="font-normal text-gray-400">(이메일 주소와 다를 때만)</span>
             </span>
-            <input name="loginUser" placeholder="예: json — 비워두면 이메일 주소로 로그인" className="input mt-1 w-full" />
+            <input name="loginUser" placeholder="예: json — 비워두면 이메일 주소로 로그인" defaultValue={prevLogin ?? ""} className="input mt-1 w-full" />
             <span className="mt-1 block text-xs text-gray-400">
               사내 메일서버는 주소(json@회사.co.kr)가 아니라 아이디(json)로 로그인하는 경우가 많습니다.
             </span>

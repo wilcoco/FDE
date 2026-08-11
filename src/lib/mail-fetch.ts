@@ -19,11 +19,16 @@ export interface ListedMail extends MailEnvelope {
   mailbox: string;
 }
 
+/** 993 = implicit TLS (IMAPS); anything else (143 등) = plaintext + STARTTLS upgrade. */
+export function imapSecure(port: number): boolean {
+  return port === 993;
+}
+
 function client(conn: ImapConn): ImapFlow {
   return new ImapFlow({
     host: conn.host,
     port: conn.port,
-    secure: true,
+    secure: imapSecure(conn.port),
     auth: { user: conn.login?.trim() || conn.email, pass: conn.pass },
     logger: false,
     // a hung mail server must not hang the page render — and a firewall that

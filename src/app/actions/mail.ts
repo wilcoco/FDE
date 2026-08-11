@@ -34,7 +34,14 @@ export async function saveMailConnection(formData: FormData) {
   } catch (e) {
     failure = classifyConnError(e);
   }
-  if (failure) redirect(`/mail?error=connect&why=${failure}`);
+  if (failure) {
+    // echo the entered values back (NOT the password) so a failed attempt
+    // doesn't force the user to retype everything
+    const echo = new URLSearchParams({
+      error: "connect", why: failure, host, port: String(port), email, login: loginUser ?? "",
+    });
+    redirect(`/mail?${echo.toString()}`);
+  }
 
   await prisma.mailConnection.upsert({
     where: { userId: user.id },
