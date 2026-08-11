@@ -161,11 +161,16 @@ export default async function MailPage({
         <span className="text-xs text-gray-400">
           이 화면을 열 때만 메일함을 읽습니다 · 기본은 메타데이터만 저장
         </span>
-        <form action={syncReplies}>
-          <PendingButton pendingLabel="받은편지함 확인 중…" className="btn px-3 py-1.5 text-sm">
-            🔄 답장 확인
-          </PendingButton>
-        </form>
+        <div className="flex items-center gap-2">
+          <Link href="/mail" className="rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50">
+            🔃 목록 새로고침
+          </Link>
+          <form action={syncReplies}>
+            <PendingButton pendingLabel="받은편지함 확인 중…" className="btn px-3 py-1.5 text-sm">
+              🔄 답장 확인
+            </PendingButton>
+          </form>
+        </div>
       </div>
 
       {fetchError && (
