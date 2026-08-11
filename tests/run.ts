@@ -51,6 +51,9 @@ async function main() {
   console.log("── pop3 ──");
   await (await import("./pop3.test")).run(t);
 
+  console.log("── mail-capabilities ──");
+  await (await import("./mail-capabilities.test")).run(t);
+
   console.log("── migrations (embedded Postgres) ──");
   await (await import("./migrations.test")).run(t);
 

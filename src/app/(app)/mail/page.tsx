@@ -2,11 +2,12 @@ import Link from "next/link";
 import { requireContext } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import { loadMailConn } from "@/lib/mail-conn";
-import { listRecentSent, protocolFor, type ListedMail } from "@/lib/mail-fetch";
+import { listRecentSent, type ListedMail } from "@/lib/mail-fetch";
 import {
   saveMailConnection, deleteMailConnection, registerMailAsSay, syncReplies,
 } from "@/app/actions/mail";
 import { normalizeMessageId } from "@/lib/inbound-email";
+import { capabilitiesFor, MAIL_PRESETS } from "@/lib/mail-capabilities";
 import PendingButton from "@/components/PendingButton";
 
 // what to tell the user for each connection-failure cause — actionable, not generic
@@ -29,16 +30,19 @@ export default async function MailPage({
   searchParams,
 }: {
   searchParams: Promise<{
-    error?: string; synced?: string; why?: string;
+    error?: string; synced?: string; why?: string; preset?: string;
     host?: string; port?: string; email?: string; login?: string; // echoed back on failure
   }>;
 }) {
   const { tenant, user } = await requireContext();
-  const { error, synced, why, host: prevHost, port: prevPort, email: prevEmail, login: prevLogin } = await searchParams;
+  const { error, synced, why, preset, host: prevHost, port: prevPort, email: prevEmail, login: prevLogin } = await searchParams;
   const conn = await loadMailConn(user.id);
 
   // ── not connected yet: setup ──
   if (!conn) {
+    const chosen = MAIL_PRESETS.find((p) => p.key === preset) ?? null;
+    const defHost = prevHost ?? chosen?.host ?? "";
+    const defPort = prevPort ?? (chosen ? String(chosen.port) : "993");
     return (
       <div className="mx-auto max-w-xl space-y-6">
         <div>
@@ -46,6 +50,29 @@ export default async function MailPage({
           <p className="mt-1 text-sm text-gray-500">
             내 메일함에서 보낸 메일을 불러와 지시로 등록하고, 답장이 왔는지 추적합니다.
           </p>
+        </div>
+
+        {/* provider presets — set expectations BEFORE the user types anything */}
+        <div>
+          <div className="mb-2 text-sm font-medium">어느 메일을 연결하나요?</div>
+          <div className="flex flex-wrap gap-2">
+            {MAIL_PRESETS.map((p) => (
+              <Link
+                key={p.key}
+                href={`/mail?preset=${p.key}`}
+                className={`rounded-full border px-3 py-1.5 text-sm ${
+                  preset === p.key
+                    ? "border-indigo-400 bg-indigo-50 text-indigo-700"
+                    : "border-gray-200 text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                {p.label}
+              </Link>
+            ))}
+          </div>
+          {chosen && (
+            <p className="mt-2 rounded-md bg-gray-50 p-3 text-xs leading-5 text-gray-600">{chosen.note}</p>
+          )}
         </div>
 
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-xs leading-5 text-emerald-800">
@@ -68,12 +95,13 @@ export default async function MailPage({
         <form action={saveMailConnection} className="card space-y-4">
           <div className="grid grid-cols-[1fr_7rem] gap-3">
             <label className="block">
-              <span className="text-sm font-medium">IMAP 서버</span>
-              <input name="host" placeholder="imap.naver.com" defaultValue={prevHost ?? ""} className="input mt-1 w-full" required />
+              <span className="text-sm font-medium">메일 서버 (IMAP 또는 POP3)</span>
+              <input name="host" placeholder="imap.naver.com" defaultValue={defHost} className="input mt-1 w-full" required />
             </label>
             <label className="block">
               <span className="text-sm font-medium">포트</span>
-              <input name="port" type="number" defaultValue={prevPort ?? 993} className="input mt-1 w-full" />
+              <input name="port" type="number" defaultValue={defPort} className="input mt-1 w-full" />
+              <span className="mt-1 block text-xs text-gray-400">IMAP 993 · POP3 995</span>
             </label>
           </div>
           <label className="block">
@@ -104,7 +132,8 @@ export default async function MailPage({
   }
 
   // ── connected: fetch mail NOW (because the user opened this screen) ──
-  const isPop3 = protocolFor(conn.port) === "pop3";
+  const caps = capabilitiesFor(conn.port);
+  const isPop3 = caps.protocol === "pop3";
   let mails: ListedMail[] = [];
   let fetchError: string | null = null;
   try {
@@ -149,11 +178,24 @@ export default async function MailPage({
         <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">메일 연결이 없습니다.</div>
       )}
 
-      {isPop3 && (
-        <div className="rounded-md border border-sky-200 bg-sky-50 p-3 text-xs leading-5 text-sky-800">
-          <b>POP3 모드</b> — 이 서버는 받은편지함만 읽을 수 있습니다. 맡기는 메일을 여기서 등록하려면{" "}
-          <b>보낼 때 숨은참조(BCC)에 {conn.email}</b>을 넣으세요. 그러면 그 메일이 아래 목록에 떠서
-          지시로 등록할 수 있고, 상대 답장도 자동으로 잡힙니다.
+      {/* capability card — the honest contract for THIS server */}
+      {isPop3 ? (
+        <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-xs leading-5 text-sky-900">
+          <div className="mb-2 font-semibold">이 서버는 POP3만 지원합니다 — 되는 것과 안 되는 것</div>
+          <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
+            <div>✅ 답장 감지 (맡긴 일에 답이 왔는지)</div>
+            <div>✅ 본문 선택 등록 + AI 꼭지 분해</div>
+            <div>✅ 받은편지함에서 지시 등록</div>
+            <div>❌ 보낸편지함 자동 표시 (POP3 프로토콜 한계)</div>
+          </div>
+          <div className="mt-3 rounded-md bg-white/70 p-3">
+            <b>사용법</b> — 맡기는 메일을 보낼 때 <b>숨은참조(BCC)에 {conn.email}</b>을 넣으세요.
+            내 편지함에 사본이 남아 아래 목록에 뜨고, [지시로 등록] 한 번이면 상대 답장까지 자동 추적됩니다.
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+          IMAP 연결 — 전체 기능 사용 중: 보낸편지함 자동 표시 · 답장 감지 · 본문 선택 등록
         </div>
       )}
 
