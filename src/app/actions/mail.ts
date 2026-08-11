@@ -11,7 +11,9 @@ import { prisma } from "@/lib/db";
 import { requireContext } from "@/lib/session";
 import { encryptSecret } from "@/lib/crypto";
 import { loadMailConn } from "@/lib/mail-conn";
-import { testConnection, listRecentInbox, fetchBody, classifyConnError } from "@/lib/mail-fetch";
+import { testConnection, listRecentInbox, fetchBody, appendToSent, classifyConnError, protocolFor } from "@/lib/mail-fetch";
+import { smtpSend, buildMessage, deriveSmtp } from "@/lib/smtp";
+import { randomUUID } from "node:crypto";
 import { counterpartyOf, extractThreadRefs, normalizeMessageId, stripQuotedTail } from "@/lib/inbound-email";
 import { generateMilestones } from "@/lib/ai";
 import { notify, notifyEmail } from "@/lib/notify";
@@ -24,6 +26,9 @@ export async function saveMailConnection(formData: FormData) {
   const email = String(formData.get("email") ?? "").trim();
   // 사내 서버: 로그인 아이디가 메일 주소와 다를 수 있음 (빈 값 = 주소로 로그인)
   const loginUser = String(formData.get("loginUser") ?? "").trim() || null;
+  const smtpHost = String(formData.get("smtpHost") ?? "").trim() || null;
+  const smtpPortRaw = Number(formData.get("smtpPort") ?? 0);
+  const smtpPort = smtpPortRaw > 0 ? smtpPortRaw : null;
   const pass = String(formData.get("password") ?? "");
   if (!host || !email || !pass) redirect("/mail?error=missing");
 
@@ -45,8 +50,8 @@ export async function saveMailConnection(formData: FormData) {
 
   await prisma.mailConnection.upsert({
     where: { userId: user.id },
-    create: { tenantId: tenant.id, userId: user.id, host, port, email, loginUser, encPass: encryptSecret(pass) },
-    update: { host, port, email, loginUser, encPass: encryptSecret(pass) },
+    create: { tenantId: tenant.id, userId: user.id, host, port, email, loginUser, smtpHost, smtpPort, encPass: encryptSecret(pass) },
+    update: { host, port, email, loginUser, smtpHost, smtpPort, encPass: encryptSecret(pass) },
   });
   await prisma.auditLog.create({
     data: { tenantId: tenant.id, actorId: user.id, action: "MAIL_CONNECTED", target: email },
@@ -134,6 +139,98 @@ export async function registerMailAsSay(formData: FormData) {
     });
     await tx.auditLog.create({
       data: { tenantId: tenant.id, actorId: user.id, action: "INSTRUCTION_FROM_MAIL_APP", target: created.id },
+    });
+    return created;
+  });
+
+  redirect(`/instructions/${inst.id}`);
+}
+
+/**
+ * Option B — compose INSIDE FlowDesk, send through the user's own SMTP
+ * server, and register the SAY at the moment of saying. The recipient gets a
+ * completely normal mail from the user's real address; FlowDesk minted the
+ * Message-ID, so the reply matches back with no BCC habit required.
+ * POP3 servers: we auto-BCC the user so a copy exists in their mailbox.
+ * IMAP servers: we APPEND a copy to the real sent folder (best-effort).
+ */
+export async function composeAndSend(formData: FormData) {
+  const { tenant, user } = await requireContext();
+  const conn = await loadMailConn(user.id);
+  if (!conn) redirect("/mail?error=noconn");
+
+  const to = String(formData.get("to") ?? "")
+    .split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+  const subject = String(formData.get("subject") ?? "").trim();
+  const text = String(formData.get("body") ?? "").trim();
+  if (to.length === 0 || !subject) redirect("/mail?error=compose_missing");
+
+  const isPop3 = protocolFor(conn.port) === "pop3";
+  const smtp = {
+    host: conn.smtpHost ?? deriveSmtp(conn.host).host,
+    port: conn.smtpPort ?? deriveSmtp(conn.host).port,
+    user: conn.login?.trim() || conn.email,
+    pass: conn.pass,
+  };
+  const domain = conn.email.split("@")[1] ?? "flowdesk.local";
+  const messageId = `fd-${randomUUID()}@${domain}`;
+  const mail = {
+    from: conn.email,
+    to,
+    bcc: isPop3 ? [conn.email] : [], // POP3: keep a copy where we can see it
+    subject,
+    text,
+    messageId,
+  };
+
+  try {
+    await smtpSend(smtp, mail);
+  } catch (e) {
+    const why = classifyConnError(e);
+    const echo = new URLSearchParams({ error: "send", why, to: to.join(", "), subject, body: text });
+    redirect(`/mail?${echo.toString()}`);
+  }
+
+  // IMAP: keep the webmail 보낸편지함 truthful (never fail the send over this)
+  if (!isPop3) void appendToSent(conn, buildMessage(mail)).catch(() => {});
+
+  // the SAY is born tracked — same shape as a registered mail
+  let summary = subject;
+  let milestones: { title: string; expectedResult: string | null }[];
+  if (text) {
+    const gen = await generateMilestones(`${subject}\n\n${text}`);
+    summary = gen.summary || summary;
+    milestones = gen.milestones.map((m) => ({ title: m.title, expectedResult: m.expectedResult || null }));
+  } else {
+    milestones = [{ title: subject, expectedResult: null }];
+  }
+
+  const inst = await prisma.$transaction(async (tx) => {
+    const created = await tx.instruction.create({
+      data: {
+        tenantId: tenant.id,
+        authorId: user.id,
+        rawText: text ? `${subject}\n\n${text}` : subject,
+        summary,
+        source: "EMAIL",
+        threadMessageId: messageId,
+        counterparty: counterpartyOf(to, conn.email) || null,
+      },
+    });
+    await tx.milestone.createMany({
+      data: milestones.map((m, i) => ({
+        tenantId: tenant.id,
+        instructionId: created.id,
+        order: i,
+        title: m.title,
+        expectedResult: m.expectedResult,
+        status: (i === 0 ? "ACTIVE" : "PENDING") as Prisma.MilestoneCreateManyInput["status"],
+        activatedAt: i === 0 ? new Date() : null,
+        proof: [] as Prisma.InputJsonValue,
+      })),
+    });
+    await tx.auditLog.create({
+      data: { tenantId: tenant.id, actorId: user.id, action: "INSTRUCTION_FROM_COMPOSE", target: created.id },
     });
     return created;
   });

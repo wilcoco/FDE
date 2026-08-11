@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { loadMailConn } from "@/lib/mail-conn";
 import { listRecentSent, type ListedMail } from "@/lib/mail-fetch";
 import {
-  saveMailConnection, deleteMailConnection, registerMailAsSay, syncReplies,
+  saveMailConnection, deleteMailConnection, registerMailAsSay, syncReplies, composeAndSend,
 } from "@/app/actions/mail";
 import { normalizeMessageId } from "@/lib/inbound-email";
 import { capabilitiesFor, MAIL_PRESETS } from "@/lib/mail-capabilities";
@@ -32,10 +32,15 @@ export default async function MailPage({
   searchParams: Promise<{
     error?: string; synced?: string; why?: string; preset?: string;
     host?: string; port?: string; email?: string; login?: string; // echoed back on failure
+    to?: string; subject?: string; body?: string; // compose echo on send failure
   }>;
 }) {
   const { tenant, user } = await requireContext();
-  const { error, synced, why, preset, host: prevHost, port: prevPort, email: prevEmail, login: prevLogin } = await searchParams;
+  const {
+    error, synced, why, preset,
+    host: prevHost, port: prevPort, email: prevEmail, login: prevLogin,
+    to: prevTo, subject: prevSubject, body: prevBody,
+  } = await searchParams;
   const conn = await loadMailConn(user.id);
 
   // ── not connected yet: setup ──
@@ -125,6 +130,22 @@ export default async function MailPage({
               (네이버: imap.naver.com · 다음: imap.daum.net · 구글: imap.gmail.com — 구글은 2단계 인증 후 앱 비밀번호 필요)
             </span>
           </label>
+          <details className="rounded-md border border-gray-100 p-3">
+            <summary className="cursor-pointer text-sm text-gray-500">보내기(SMTP) 설정 — 비워두면 자동</summary>
+            <div className="mt-3 grid grid-cols-[1fr_7rem] gap-3">
+              <label className="block">
+                <span className="text-sm font-medium">SMTP 서버</span>
+                <input name="smtpHost" placeholder="자동 (받는 서버에서 유추)" className="input mt-1 w-full" />
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium">포트</span>
+                <input name="smtpPort" type="number" placeholder="587/465" className="input mt-1 w-full" />
+              </label>
+            </div>
+            <p className="mt-2 text-xs text-gray-400">
+              앱에서 메일을 직접 보낼 때 씁니다 (같은 아이디·비밀번호로 로그인). 네이버·구글·다음은 자동 설정됩니다.
+            </p>
+          </details>
           <PendingButton pendingLabel="연결 확인 중… (최대 10초)">연결하기</PendingButton>
         </form>
       </div>
@@ -183,21 +204,66 @@ export default async function MailPage({
         <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-xs leading-5 text-sky-900">
           <div className="mb-2 font-semibold">이 서버는 POP3만 지원합니다 — 되는 것과 안 되는 것</div>
           <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
+            <div>✅ 아래 &quot;메일로 맡기기&quot;에서 바로 발송+등록</div>
             <div>✅ 답장 감지 (맡긴 일에 답이 왔는지)</div>
-            <div>✅ 본문 선택 등록 + AI 꼭지 분해</div>
-            <div>✅ 받은편지함에서 지시 등록</div>
+            <div>✅ 받은편지함에서 지시 등록 · 본문 선택 + AI 분해</div>
             <div>❌ 보낸편지함 자동 표시 (POP3 프로토콜 한계)</div>
           </div>
           <div className="mt-3 rounded-md bg-white/70 p-3">
-            <b>사용법</b> — 맡기는 메일을 보낼 때 <b>숨은참조(BCC)에 {conn.email}</b>을 넣으세요.
-            내 편지함에 사본이 남아 아래 목록에 뜨고, [지시로 등록] 한 번이면 상대 답장까지 자동 추적됩니다.
+            <b>가장 쉬운 방법</b> — 아래 <b>메일로 맡기기</b>에서 보내면 BCC 없이도 자동 등록됩니다.
+            웹메일에서 보낼 때만 <b>숨은참조(BCC)에 {conn.email}</b>을 넣어 여기서 등록하세요.
           </div>
         </div>
       ) : (
         <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-          IMAP 연결 — 전체 기능 사용 중: 보낸편지함 자동 표시 · 답장 감지 · 본문 선택 등록
+          IMAP 연결 — 전체 기능 사용 중: 바로 발송+등록 · 보낸편지함 자동 표시 · 답장 감지 · 본문 선택 등록
         </div>
       )}
+
+      {/* Option B — compose here, the SAY is born tracked */}
+      <div className="card">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="font-semibold">✉️ 메일로 맡기기</h2>
+          <span className="text-xs text-gray-400">{conn.email} 명의로 발송 · 보낸 즉시 지시로 등록</span>
+        </div>
+        {error === "send" && (
+          <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {why === "auth" && "메일 서버가 로그인(SMTP 인증)을 거부했습니다. 아이디·비밀번호를 확인하세요."}
+            {why === "timeout" && "보내기 서버가 응답하지 않습니다. SMTP 설정(연결 해제 후 재연결)에서 포트를 465 또는 587로 바꿔보세요."}
+            {why === "refused" && "보내기 서버가 접속을 거부했습니다. SMTP 포트를 465 또는 587로 바꿔보세요."}
+            {(why === "dns" || why === "other" || !why) && "메일 발송에 실패했습니다. SMTP 설정을 확인해주세요."}
+            {" "}(작성한 내용은 그대로 남아 있습니다)
+          </div>
+        )}
+        {error === "compose_missing" && (
+          <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            받는 사람과 제목을 입력해주세요.
+          </div>
+        )}
+        <form action={composeAndSend} className="space-y-3">
+          <input
+            name="to" placeholder="받는 사람 (쉼표로 여러 명)" defaultValue={prevTo ?? ""}
+            className="input w-full" required
+          />
+          <input
+            name="subject" placeholder="제목 — 맡기는 일이 한 줄로 드러나게" defaultValue={prevSubject ?? ""}
+            className="input w-full" required
+          />
+          <textarea
+            name="body" rows={4} defaultValue={prevBody ?? ""}
+            placeholder="내용 (선택) — 적으면 AI가 꼭지로 분해해 추적합니다"
+            className="input w-full"
+          />
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-400">
+              상대는 평범한 메일을 받습니다 · 답장하면 자동으로 이행(DO) 기록
+            </span>
+            <PendingButton pendingLabel="발송 중…" className="btn px-4 py-2 text-sm">
+              보내고 지시로 등록
+            </PendingButton>
+          </div>
+        </form>
+      </div>
 
       <div className="flex items-center justify-between">
         <span className="text-xs text-gray-400">

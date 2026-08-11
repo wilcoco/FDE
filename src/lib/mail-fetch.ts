@@ -148,6 +148,25 @@ export async function listRecentInbox(conn: ImapConn, n = 30): Promise<ListedMai
   }
 }
 
+/**
+ * IMAP only: store a copy of a sent message into the real sent folder, so the
+ * user's webmail 보낸편지함 stays truthful about mail composed in FlowDesk.
+ * Best-effort — a failure here must never fail the send itself.
+ */
+export async function appendToSent(conn: ImapConn, rawMessage: string): Promise<void> {
+  if (protocolFor(conn.port) === "pop3") return; // no folders in POP3
+  const c = client(conn);
+  await c.connect();
+  try {
+    const boxes = await c.list();
+    const sent = pickSentMailbox(boxes.map((b) => ({ path: b.path, specialUse: b.specialUse })));
+    if (!sent) return;
+    await c.append(sent, rawMessage, ["\\Seen"]);
+  } finally {
+    await c.logout().catch(() => {});
+  }
+}
+
 /** Body of one specific mail — fetched ONLY on per-mail opt-in. */
 export async function fetchBody(conn: ImapConn, mailbox: string, seq: number, uid?: string): Promise<string> {
   if (protocolFor(conn.port) === "pop3") {
