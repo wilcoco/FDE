@@ -94,60 +94,65 @@ export default async function MailPage({
         )}
         {error === "missing" && (
           <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            모든 항목을 입력해주세요.
+            이메일 주소와 비밀번호를 입력해주세요.
+          </div>
+        )}
+        {error === "detect" && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            이 주소의 메일 서버를 자동으로 찾지 못했습니다. 회사 방화벽이 외부 접속을 막고 있거나,
+            서버 주소가 관례와 다른 경우입니다. 아래 <b>고급 설정</b>에 서버 주소를 직접 입력해주세요.
           </div>
         )}
 
         <form action={saveMailConnection} className="card space-y-4">
-          <div className="grid grid-cols-[1fr_7rem] gap-3">
-            <label className="block">
-              <span className="text-sm font-medium">메일 서버 (IMAP 또는 POP3)</span>
-              <input name="host" placeholder="imap.naver.com" defaultValue={defHost} className="input mt-1 w-full" required />
-            </label>
-            <label className="block">
-              <span className="text-sm font-medium">포트</span>
-              <input name="port" type="number" defaultValue={defPort} className="input mt-1 w-full" />
-              <span className="mt-1 block text-xs text-gray-400">IMAP 993 · POP3 995</span>
-            </label>
-          </div>
           <label className="block">
             <span className="text-sm font-medium">이메일 주소</span>
-            <input name="email" type="email" placeholder="me@naver.com" defaultValue={prevEmail ?? ""} className="input mt-1 w-full" required />
+            <input name="email" type="email" placeholder="me@company.co.kr" defaultValue={prevEmail ?? ""} className="input mt-1 w-full" required />
+            <span className="mt-1 block text-xs text-gray-400">
+              주소만으로 메일 서버를 자동으로 찾아 연결합니다.
+            </span>
+          </label>
+          <label className="block">
+            <span className="text-sm font-medium">비밀번호</span>
+            <input name="password" type="password" className="input mt-1 w-full" required />
+            <span className="mt-1 block text-xs text-gray-400">
+              네이버·구글·다음은 원래 비밀번호가 아니라 &apos;앱 비밀번호&apos;(2단계 인증 후 발급)를 쓰세요. 회사 메일은 메일 비밀번호 그대로.
+            </span>
           </label>
           <label className="block">
             <span className="text-sm font-medium">
               로그인 아이디 <span className="font-normal text-gray-400">(이메일 주소와 다를 때만)</span>
             </span>
             <input name="loginUser" placeholder="예: json — 비워두면 이메일 주소로 로그인" defaultValue={prevLogin ?? ""} className="input mt-1 w-full" />
-            <span className="mt-1 block text-xs text-gray-400">
-              사내 메일서버는 주소(json@회사.co.kr)가 아니라 아이디(json)로 로그인하는 경우가 많습니다.
-            </span>
           </label>
-          <label className="block">
-            <span className="text-sm font-medium">앱 비밀번호</span>
-            <input name="password" type="password" className="input mt-1 w-full" required />
-            <span className="mt-1 block text-xs text-gray-400">
-              메일 서비스의 [환경설정 → IMAP/POP → 앱 비밀번호]에서 발급한 비밀번호를 쓰세요.
-              (네이버: imap.naver.com · 다음: imap.daum.net · 구글: imap.gmail.com — 구글은 2단계 인증 후 앱 비밀번호 필요)
-            </span>
-          </label>
-          <details className="rounded-md border border-gray-100 p-3">
-            <summary className="cursor-pointer text-sm text-gray-500">보내기(SMTP) 설정 — 비워두면 자동</summary>
-            <div className="mt-3 grid grid-cols-[1fr_7rem] gap-3">
-              <label className="block">
-                <span className="text-sm font-medium">SMTP 서버</span>
-                <input name="smtpHost" placeholder="자동 (받는 서버에서 유추)" className="input mt-1 w-full" />
-              </label>
-              <label className="block">
-                <span className="text-sm font-medium">포트</span>
-                <input name="smtpPort" type="number" placeholder="587/465" className="input mt-1 w-full" />
-              </label>
+
+          <details open={!!defHost || error === "detect"} className="rounded-md border border-gray-100 p-3">
+            <summary className="cursor-pointer text-sm text-gray-500">고급 설정 — 서버를 직접 입력</summary>
+            <div className="mt-3 space-y-3">
+              <div className="grid grid-cols-[1fr_7rem] gap-3">
+                <label className="block">
+                  <span className="text-sm font-medium">메일 서버 (IMAP 또는 POP3)</span>
+                  <input name="host" placeholder="비워두면 자동 감지" defaultValue={defHost} className="input mt-1 w-full" />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-medium">포트</span>
+                  <input name="port" type="number" placeholder="993" defaultValue={defHost ? defPort : ""} className="input mt-1 w-full" />
+                  <span className="mt-1 block text-xs text-gray-400">IMAP 993 · POP3 995</span>
+                </label>
+              </div>
+              <div className="grid grid-cols-[1fr_7rem] gap-3">
+                <label className="block">
+                  <span className="text-sm font-medium">SMTP 서버 (보내기)</span>
+                  <input name="smtpHost" placeholder="비워두면 자동 감지" className="input mt-1 w-full" />
+                </label>
+                <label className="block">
+                  <span className="text-sm font-medium">포트</span>
+                  <input name="smtpPort" type="number" placeholder="465/587" className="input mt-1 w-full" />
+                </label>
+              </div>
             </div>
-            <p className="mt-2 text-xs text-gray-400">
-              앱에서 메일을 직접 보낼 때 씁니다 (같은 아이디·비밀번호로 로그인). 네이버·구글·다음은 자동 설정됩니다.
-            </p>
           </details>
-          <PendingButton pendingLabel="연결 확인 중… (최대 10초)">연결하기</PendingButton>
+          <PendingButton pendingLabel="서버 찾고 연결 중… (최대 20초)">자동으로 찾아 연결</PendingButton>
         </form>
       </div>
     );

@@ -13,6 +13,7 @@ import { encryptSecret } from "@/lib/crypto";
 import { loadMailConn } from "@/lib/mail-conn";
 import { testConnection, listRecentInbox, fetchBody, appendToSent, classifyConnError, protocolFor } from "@/lib/mail-fetch";
 import { smtpSend, buildMessage, deriveSmtp } from "@/lib/smtp";
+import { detectEndpoints } from "@/lib/mail-autodetect";
 import { randomUUID } from "node:crypto";
 import { counterpartyOf, extractThreadRefs, normalizeMessageId, stripQuotedTail } from "@/lib/inbound-email";
 import { generateMilestones } from "@/lib/ai";
@@ -21,16 +22,29 @@ import type { Prisma } from "@prisma/client";
 
 export async function saveMailConnection(formData: FormData) {
   const { tenant, user } = await requireContext();
-  const host = String(formData.get("host") ?? "").trim();
-  const port = Number(formData.get("port") ?? 993) || 993;
+  let host = String(formData.get("host") ?? "").trim();
+  let port = Number(formData.get("port") ?? 0) || 0;
   const email = String(formData.get("email") ?? "").trim();
   // 사내 서버: 로그인 아이디가 메일 주소와 다를 수 있음 (빈 값 = 주소로 로그인)
   const loginUser = String(formData.get("loginUser") ?? "").trim() || null;
-  const smtpHost = String(formData.get("smtpHost") ?? "").trim() || null;
+  let smtpHost = String(formData.get("smtpHost") ?? "").trim() || null;
   const smtpPortRaw = Number(formData.get("smtpPort") ?? 0);
-  const smtpPort = smtpPortRaw > 0 ? smtpPortRaw : null;
+  let smtpPort = smtpPortRaw > 0 ? smtpPortRaw : null;
   const pass = String(formData.get("password") ?? "");
-  if (!host || !email || !pass) redirect("/mail?error=missing");
+  if (!email || !pass) redirect("/mail?error=missing");
+
+  // 자동 감지: 서버를 안 적었으면 주소만으로 찾는다 (known provider / MX + 포트 스캔)
+  if (!host) {
+    const detected = await detectEndpoints(email);
+    if (!detected.incoming) redirect("/mail?error=detect");
+    host = detected.incoming.host;
+    port = detected.incoming.port;
+    if (!smtpHost && detected.smtp) {
+      smtpHost = detected.smtp.host;
+      smtpPort = detected.smtp.port;
+    }
+  }
+  if (!port) port = 993;
 
   // verify before saving — a wrong app password should fail HERE, not on every open
   let failure: string | null = null;
