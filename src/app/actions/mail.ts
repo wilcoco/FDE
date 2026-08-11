@@ -15,7 +15,7 @@ import { testConnection, listRecentInbox, fetchBody, appendToSent, classifyConnE
 import { smtpSend, buildMessage, deriveSmtp } from "@/lib/smtp";
 import { detectEndpoints } from "@/lib/mail-autodetect";
 import { randomUUID } from "node:crypto";
-import { counterpartyOf, extractThreadRefs, normalizeMessageId, stripQuotedTail } from "@/lib/inbound-email";
+import { counterpartyOf, extractThreadRefs, normalizeMessageId, stripQuotedTail, pickInstructionForReply, normalizeEmail } from "@/lib/inbound-email";
 import { generateMilestones } from "@/lib/ai";
 import { notify, notifyEmail } from "@/lib/notify";
 import type { Prisma } from "@prisma/client";
@@ -111,19 +111,26 @@ export async function registerMailAsSay(formData: FormData) {
   const withBody = formData.get("withBody") === "1";
   if (!messageId) redirect("/mail?error=nomsgid");
 
-  // idempotent: registering the same mail twice is a no-op
-  const dup = await prisma.instruction.findFirst({
-    where: { tenantId: tenant.id, threadMessageId: messageId },
-    select: { id: true },
-  });
-  if (dup) redirect(`/instructions/${dup.id}`);
-
   const to = toRaw.split(",").map((s) => s.trim()).filter(Boolean);
 
   const conn = await loadMailConn(user.id);
   // self-exclusion must use the MAILBOX address (json@icams.co.kr), which can
   // differ from the FlowDesk account email — otherwise "나"가 상대방으로 잡힘
   const selfEmail = conn?.email ?? user.email;
+
+  // 여러 명에게 보낸 메일은 상대방마다 자기 루프를 가진다 (같은 스레드 공유)
+  const counterparties = (counterpartyOf(to, selfEmail) || "")
+    .split(",").map((s) => s.trim()).filter(Boolean);
+  const perRecipient: (string | null)[] = counterparties.length > 0 ? counterparties : [null];
+
+  // idempotent per (thread, counterparty): re-click adds only the missing loops
+  const existing = await prisma.instruction.findMany({
+    where: { tenantId: tenant.id, threadMessageId: messageId },
+    select: { id: true, counterparty: true },
+  });
+  const already = new Set(existing.map((r) => r.counterparty ?? ""));
+  const missing = perRecipient.filter((c) => !already.has(c ?? ""));
+  if (missing.length === 0 && existing.length > 0) redirect(`/instructions/${existing[0].id}`);
 
   let body = "";
   if (withBody && conn && (uid || (mailbox && seq > 0))) {
@@ -140,37 +147,43 @@ export async function registerMailAsSay(formData: FormData) {
     milestones = [{ title: subject, expectedResult: null }];
   }
 
-  const inst = await prisma.$transaction(async (tx) => {
-    const created = await tx.instruction.create({
-      data: {
-        tenantId: tenant.id,
-        authorId: user.id,
-        rawText: body ? `${subject}\n\n${body}` : `[메타데이터만] ${subject}`,
-        summary,
-        source: "EMAIL",
-        threadMessageId: messageId,
-        counterparty: counterpartyOf(to, selfEmail) || null,
-      },
+  // one loop per counterparty — a reply from A must not close B's loop
+  const createdIds: string[] = [];
+  for (const counterparty of missing) {
+    const inst = await prisma.$transaction(async (tx) => {
+      const created = await tx.instruction.create({
+        data: {
+          tenantId: tenant.id,
+          authorId: user.id,
+          rawText: body ? `${subject}\n\n${body}` : `[메타데이터만] ${subject}`,
+          summary,
+          source: "EMAIL",
+          threadMessageId: messageId,
+          counterparty,
+        },
+      });
+      await tx.milestone.createMany({
+        data: milestones.map((m, i) => ({
+          tenantId: tenant.id,
+          instructionId: created.id,
+          order: i,
+          title: m.title,
+          expectedResult: m.expectedResult,
+          status: (i === 0 ? "ACTIVE" : "PENDING") as Prisma.MilestoneCreateManyInput["status"],
+          activatedAt: i === 0 ? new Date() : null,
+          proof: [] as Prisma.InputJsonValue,
+        })),
+      });
+      await tx.auditLog.create({
+        data: { tenantId: tenant.id, actorId: user.id, action: "INSTRUCTION_FROM_MAIL_APP", target: created.id },
+      });
+      return created;
     });
-    await tx.milestone.createMany({
-      data: milestones.map((m, i) => ({
-        tenantId: tenant.id,
-        instructionId: created.id,
-        order: i,
-        title: m.title,
-        expectedResult: m.expectedResult,
-        status: (i === 0 ? "ACTIVE" : "PENDING") as Prisma.MilestoneCreateManyInput["status"],
-        activatedAt: i === 0 ? new Date() : null,
-        proof: [] as Prisma.InputJsonValue,
-      })),
-    });
-    await tx.auditLog.create({
-      data: { tenantId: tenant.id, actorId: user.id, action: "INSTRUCTION_FROM_MAIL_APP", target: created.id },
-    });
-    return created;
-  });
+    createdIds.push(inst.id);
+  }
 
-  redirect(`/instructions/${inst.id}`);
+  if (createdIds.length === 1) redirect(`/instructions/${createdIds[0]}`);
+  redirect(`/dashboard?sent=${createdIds.length}`);
 }
 
 /**
@@ -190,6 +203,9 @@ export async function composeAndSend(formData: FormData) {
     .split(/[,;]/).map((s) => s.trim()).filter(Boolean);
   const subject = String(formData.get("subject") ?? "").trim();
   const text = String(formData.get("body") ?? "").trim();
+  // 여러 명에게 맡기면 각자 자기 몫의 답을 빚진다 — 기본은 수신자별 개별
+  // 발송·개별 루프. 끄면 공동 스레드 하나로 추적(아무나 답하면 됨).
+  const individual = formData.get("individual") === "on" && to.length > 1;
   if (to.length === 0 || !subject) redirect("/mail?error=compose_missing");
 
   const isPop3 = protocolFor(conn.port) === "pop3";
@@ -200,28 +216,8 @@ export async function composeAndSend(formData: FormData) {
     pass: conn.pass,
   };
   const domain = conn.email.split("@")[1] ?? "flowdesk.local";
-  const messageId = `fd-${randomUUID()}@${domain}`;
-  const mail = {
-    from: conn.email,
-    to,
-    bcc: isPop3 ? [conn.email] : [], // POP3: keep a copy where we can see it
-    subject,
-    text,
-    messageId,
-  };
 
-  try {
-    await smtpSend(smtp, mail);
-  } catch (e) {
-    const why = classifyConnError(e);
-    const echo = new URLSearchParams({ error: "send", why, to: to.join(", "), subject, body: text });
-    redirect(`/mail?${echo.toString()}`);
-  }
-
-  // IMAP: keep the webmail 보낸편지함 truthful (never fail the send over this)
-  if (!isPop3) void appendToSent(conn, buildMessage(mail)).catch(() => {});
-
-  // the SAY is born tracked — same shape as a registered mail
+  // decompose ONCE — the same body applies to every recipient's loop
   let summary = subject;
   let milestones: { title: string; expectedResult: string | null }[];
   if (text) {
@@ -232,37 +228,73 @@ export async function composeAndSend(formData: FormData) {
     milestones = [{ title: subject, expectedResult: null }];
   }
 
-  const inst = await prisma.$transaction(async (tx) => {
-    const created = await tx.instruction.create({
-      data: {
-        tenantId: tenant.id,
-        authorId: user.id,
-        rawText: text ? `${subject}\n\n${text}` : subject,
-        summary,
-        source: "EMAIL",
-        threadMessageId: messageId,
-        counterparty: counterpartyOf(to, conn.email) || null,
-      },
+  const createInstruction = (messageId: string, counterparty: string | null) =>
+    prisma.$transaction(async (tx) => {
+      const created = await tx.instruction.create({
+        data: {
+          tenantId: tenant.id,
+          authorId: user.id,
+          rawText: text ? `${subject}\n\n${text}` : subject,
+          summary,
+          source: "EMAIL",
+          threadMessageId: messageId,
+          counterparty,
+        },
+      });
+      await tx.milestone.createMany({
+        data: milestones.map((m, i) => ({
+          tenantId: tenant.id,
+          instructionId: created.id,
+          order: i,
+          title: m.title,
+          expectedResult: m.expectedResult,
+          status: (i === 0 ? "ACTIVE" : "PENDING") as Prisma.MilestoneCreateManyInput["status"],
+          activatedAt: i === 0 ? new Date() : null,
+          proof: [] as Prisma.InputJsonValue,
+        })),
+      });
+      await tx.auditLog.create({
+        data: { tenantId: tenant.id, actorId: user.id, action: "INSTRUCTION_FROM_COMPOSE", target: created.id },
+      });
+      return created;
     });
-    await tx.milestone.createMany({
-      data: milestones.map((m, i) => ({
-        tenantId: tenant.id,
-        instructionId: created.id,
-        order: i,
-        title: m.title,
-        expectedResult: m.expectedResult,
-        status: (i === 0 ? "ACTIVE" : "PENDING") as Prisma.MilestoneCreateManyInput["status"],
-        activatedAt: i === 0 ? new Date() : null,
-        proof: [] as Prisma.InputJsonValue,
-      })),
-    });
-    await tx.auditLog.create({
-      data: { tenantId: tenant.id, actorId: user.id, action: "INSTRUCTION_FROM_COMPOSE", target: created.id },
-    });
-    return created;
-  });
 
-  redirect(`/instructions/${inst.id}`);
+  // 개별 모드: 수신자마다 자기 Message-ID를 가진 별도 메일 → 답장이 정확히
+  // 자기 루프에 꽂힌다 (수신자끼리 서로 안 보이는 건 덤 — 견적 요청 예절)
+  const batches: { rcpts: string[]; counterparty: string | null }[] = individual
+    ? to.map((r) => ({ rcpts: [r], counterparty: counterpartyOf([r], conn.email) || null }))
+    : [{ rcpts: to, counterparty: counterpartyOf(to, conn.email) || null }];
+
+  const createdIds: string[] = [];
+  for (const [i, batch] of batches.entries()) {
+    const messageId = `fd-${randomUUID()}@${domain}`;
+    const mail = {
+      from: conn.email,
+      to: batch.rcpts,
+      bcc: isPop3 ? [conn.email] : [], // POP3: keep a copy where we can see it
+      subject,
+      text,
+      messageId,
+    };
+    try {
+      await smtpSend(smtp, mail);
+    } catch (e) {
+      const why = classifyConnError(e);
+      // partial failure: report what went out and what didn't, keep the draft
+      const remaining = batches.slice(i).flatMap((b) => b.rcpts).join(", ");
+      const echo = new URLSearchParams({
+        error: "send", why, to: remaining, subject, body: text,
+        ...(createdIds.length ? { sent: String(createdIds.length) } : {}),
+      });
+      redirect(`/mail?${echo.toString()}`);
+    }
+    if (!isPop3) void appendToSent(conn, buildMessage(mail)).catch(() => {});
+    const inst = await createInstruction(messageId, batch.counterparty);
+    createdIds.push(inst.id);
+  }
+
+  if (createdIds.length === 1) redirect(`/instructions/${createdIds[0]}`);
+  redirect(`/dashboard?sent=${createdIds.length}`);
 }
 
 /**
@@ -282,13 +314,15 @@ export async function syncReplies() {
   for (const m of candidates) {
     const refs = extractThreadRefs({ inReplyTo: m.inReplyTo, references: m.references });
     if (refs.length === 0) continue;
-    const parent = await prisma.instruction.findFirst({
+    // several loops can share one thread (multi-recipient SAY) — the reply
+    // belongs to the SENDER's loop, not whichever row happens to come first
+    const candidatesRows = await prisma.instruction.findMany({
       where: { tenantId: tenant.id, threadMessageId: { in: refs }, source: "EMAIL" },
-      select: { id: true, authorId: true, summary: true, replyReceivedAt: true },
+      select: { id: true, authorId: true, summary: true, replyReceivedAt: true, counterparty: true },
     });
-    if (!parent) continue;
-
     const senderEmail = m.from ?? "(알 수 없음)";
+    const parent = pickInstructionForReply(candidatesRows, senderEmail);
+    if (!parent) continue;
     if (!parent.replyReceivedAt) {
       await prisma.instruction.update({
         where: { id: parent.id },

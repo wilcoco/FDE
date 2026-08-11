@@ -3,7 +3,8 @@ import { notify, notifyEmail } from "@/lib/notify";
 import { generateMilestones } from "@/lib/ai";
 import {
   parseInboundAddress, normalizeEmail, normalizeMessageId, extractThreadRefs,
-  routeInboundEmail, selectStoredBody, counterpartyOf, type InboundPayload,
+  routeInboundEmail, selectStoredBody, counterpartyOf, pickInstructionForReply,
+  type InboundPayload,
 } from "@/lib/inbound-email";
 import type { Prisma } from "@prisma/client";
 
@@ -51,7 +52,7 @@ export async function POST(req: Request) {
   const knownRows = tenant && refs.length
     ? await prisma.instruction.findMany({
         where: { tenantId: tenant.id, threadMessageId: { in: refs } },
-        select: { id: true, threadMessageId: true, authorId: true, summary: true, milestones: { select: { id: true }, orderBy: { order: "asc" }, take: 1 } },
+        select: { id: true, threadMessageId: true, authorId: true, summary: true, counterparty: true, milestones: { select: { id: true }, orderBy: { order: "asc" }, take: 1 } },
       })
     : [];
   const known = new Set(knownRows.map((r) => r.threadMessageId!).filter(Boolean));
@@ -66,7 +67,10 @@ export async function POST(req: Request) {
 
   // ─── reply → DO signal on the matched instruction ───
   if (decision.action === "reply") {
-    const parent = knownRows.find((r) => r.threadMessageId === decision.parentMessageId)!;
+    // multi-recipient SAYs split into one loop per counterparty sharing the
+    // thread id — the reply belongs to the SENDER's loop
+    const sameThread = knownRows.filter((r) => r.threadMessageId === decision.parentMessageId);
+    const parent = pickInstructionForReply(sameThread, senderEmail)!;
     const body = selectStoredBody(p.text, tenant!.storeEmailBody);
     const preview = body ? ` — ${body.slice(0, 120)}` : "";
     // stamp the open loop as answered (mirror: surfaces, doesn't auto-complete)

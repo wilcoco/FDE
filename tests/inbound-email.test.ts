@@ -5,7 +5,8 @@
 import assert from "node:assert/strict";
 import {
   inboundAddress, parseInboundAddress, normalizeEmail, normalizeMessageId, extractThreadRefs,
-  routeInboundEmail, selectStoredBody, stripQuotedTail, counterpartyOf, type InboundPayload,
+  routeInboundEmail, selectStoredBody, stripQuotedTail, counterpartyOf, pickInstructionForReply,
+  type InboundPayload,
 } from "../src/lib/inbound-email";
 
 const base = (over: Partial<InboundPayload> = {}): InboundPayload => ({
@@ -33,6 +34,24 @@ export async function run(t: (name: string, fn: () => void) => void) {
     const refs = extractThreadRefs({ inReplyTo: "<b@m>", references: "<a@m> <b@m>" });
     assert.equal(refs[0], "b@m"); // nearest ancestor first
     assert.ok(refs.includes("a@m"));
+  });
+
+  t("pickInstructionForReply: reply lands on the SENDER's loop", () => {
+    const rows = [
+      { id: "a", counterparty: "vendor-a@x.com" },
+      { id: "b", counterparty: "vendor-b@y.com" },
+      { id: "c", counterparty: null },
+    ];
+    assert.equal(pickInstructionForReply(rows, "Vendor B <VENDOR-B@Y.com>")?.id, "b");
+    assert.equal(pickInstructionForReply(rows, "vendor-a@x.com")?.id, "a");
+    // unknown sender falls back to the first row (still visible somewhere)
+    assert.equal(pickInstructionForReply(rows, "stranger@z.com")?.id, "a");
+    assert.equal(pickInstructionForReply([], "x@y"), null);
+  });
+
+  t("pickInstructionForReply: comma-joined counterparty lists match too", () => {
+    const rows = [{ id: "g", counterparty: "a@x.com, b@y.com" }];
+    assert.equal(pickInstructionForReply(rows, "b@y.com")?.id, "g");
   });
 
   t("normalizeMessageId strips angle brackets (real headers carry them)", () => {

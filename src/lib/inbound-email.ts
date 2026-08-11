@@ -127,6 +127,24 @@ export function counterpartyOf(to: string[], sender: string): string {
   return out.join(", ");
 }
 
+/**
+ * When several instructions track the same thread (multi-recipient SAY split
+ * into per-counterparty loops), a reply belongs to the SENDER's loop: pick
+ * the row whose counterparty list contains the sender. Falls back to the
+ * first row so a forwarded/odd reply still lands somewhere visible.
+ */
+export function pickInstructionForReply<T extends { counterparty: string | null }>(
+  rows: T[],
+  senderEmail: string,
+): T | null {
+  if (rows.length === 0) return null;
+  const sender = normalizeEmail(senderEmail);
+  const hit = rows.find((r) =>
+    (r.counterparty ?? "").split(",").map((s) => normalizeEmail(s)).includes(sender),
+  );
+  return hit ?? rows[0];
+}
+
 /** Metadata always kept; body only when the tenant opted in. */
 export function selectStoredBody(rawText: string | null | undefined, storeBody: boolean): string {
   if (!storeBody) return "";

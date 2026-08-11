@@ -5,8 +5,13 @@ import { maybeSweep, attentionSummary, openLoops } from "@/lib/sweep";
 import { completeFromReply } from "@/app/actions/capture";
 import type { StrategyResult } from "@/lib/ai";
 
-export default async function Dashboard() {
+export default async function Dashboard({
+  searchParams,
+}: {
+  searchParams?: Promise<{ sent?: string }>;
+}) {
   const { tenant, user } = await requireContext();
+  const { sent } = (await searchParams) ?? {};
   await maybeSweep(tenant.id); // stall/overdue watchdog (throttled)
 
   const [activeInstructions, myMilestones, myApprovalSteps, recent, attention, latestSynthesis] =
@@ -63,6 +68,12 @@ export default async function Dashboard() {
         <h1 className="text-2xl font-bold">안녕하세요, {user.name}님</h1>
         <p className="mt-1 text-gray-500">말 한마디면 조직이 움직입니다. 지시하고, 흐르는지 확인하세요.</p>
       </div>
+
+      {sent && Number(sent) > 1 && (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          ✉️ {sent}명에게 각각 발송했습니다 — 아래 열린 고리에서 한 명 한 명의 답장을 따로 추적합니다.
+        </div>
+      )}
 
       {/* say-do gap: what needs my eyes right now */}
       {hasAttention && (

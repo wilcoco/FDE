@@ -177,7 +177,12 @@ export default async function MailPage({
         select: { id: true, threadMessageId: true, replyReceivedAt: true },
       })
     : [];
-  const byMsgId = new Map(existing.map((r) => [r.threadMessageId!, r]));
+  // a multi-recipient mail owns SEVERAL loops (one per counterparty)
+  const byMsgId = new Map<string, typeof existing>();
+  for (const r of existing) {
+    const k = r.threadMessageId!;
+    byMsgId.set(k, [...(byMsgId.get(k) ?? []), r]);
+  }
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -286,6 +291,13 @@ export default async function MailPage({
             placeholder="내용 (선택) — 적으면 AI가 꼭지로 분해해 추적합니다"
             className="input w-full"
           />
+          <label className="flex items-start gap-2 text-xs text-gray-600">
+            <input type="checkbox" name="individual" defaultChecked className="mt-0.5 h-3.5 w-3.5 accent-indigo-600" />
+            <span>
+              <b>받는 사람마다 개별 발송·개별 추적</b> — 여러 명이면 각자에게 따로 보내고,
+              한 명 한 명의 답장을 따로 기다립니다 (서로의 주소는 안 보임). 끄면 한 스레드로 묶어 아무나 답하면 됩니다.
+            </span>
+          </label>
           <div className="flex items-center justify-between">
             <span className="text-xs text-gray-400">
               상대는 평범한 메일을 받습니다 · 답장하면 자동으로 이행(DO) 기록
@@ -335,13 +347,22 @@ export default async function MailPage({
                   {m.date?.slice(0, 10)} · → {to || "?"}
                 </div>
               </div>
-              {reg ? (
-                <Link
-                  href={`/instructions/${reg.id}`}
-                  className={`badge shrink-0 ${reg.replyReceivedAt ? "bg-emerald-100 text-emerald-700" : "bg-indigo-50 text-indigo-600"}`}
-                >
-                  {reg.replyReceivedAt ? "✉ 답장 도착" : "등록됨 · 답장 대기"}
-                </Link>
+              {reg && reg.length > 0 ? (
+                (() => {
+                  const replied = reg.filter((r) => r.replyReceivedAt).length;
+                  const all = reg.length;
+                  const done = replied === all;
+                  return (
+                    <Link
+                      href={all === 1 ? `/instructions/${reg[0].id}` : "/dashboard"}
+                      className={`badge shrink-0 ${replied > 0 ? "bg-emerald-100 text-emerald-700" : "bg-indigo-50 text-indigo-600"}`}
+                    >
+                      {all === 1
+                        ? (done ? "✉ 답장 도착" : "등록됨 · 답장 대기")
+                        : `✉ 답장 ${replied}/${all}`}
+                    </Link>
+                  );
+                })()
               ) : (
                 <div className="flex shrink-0 gap-1">
                   <form action={registerMailAsSay}>
