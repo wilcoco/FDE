@@ -4,8 +4,9 @@ import { prisma } from "@/lib/db";
 import { loadMailConn } from "@/lib/mail-conn";
 import { listRecentSent, type ListedMail } from "@/lib/mail-fetch";
 import {
-  saveMailConnection, deleteMailConnection, registerMailAsSay, syncReplies, composeAndSend,
+  saveMailConnection, deleteMailConnection, registerMailAsSay, syncReplies, composeAndSend, updateSmtpSettings,
 } from "@/app/actions/mail";
+import { deriveSmtp } from "@/lib/smtp";
 import { normalizeMessageId } from "@/lib/inbound-email";
 import { capabilitiesFor, MAIL_PRESETS } from "@/lib/mail-capabilities";
 import PendingButton from "@/components/PendingButton";
@@ -30,14 +31,14 @@ export default async function MailPage({
   searchParams,
 }: {
   searchParams: Promise<{
-    error?: string; synced?: string; why?: string; preset?: string;
+    error?: string; synced?: string; why?: string; preset?: string; smtp?: string;
     host?: string; port?: string; email?: string; login?: string; // echoed back on failure
     to?: string; subject?: string; body?: string; // compose echo on send failure
   }>;
 }) {
   const { tenant, user } = await requireContext();
   const {
-    error, synced, why, preset,
+    error, synced, why, preset, smtp: smtpSaved,
     host: prevHost, port: prevPort, email: prevEmail, login: prevLogin,
     to: prevTo, subject: prevSubject, body: prevBody,
   } = await searchParams;
@@ -226,12 +227,38 @@ export default async function MailPage({
           <h2 className="font-semibold">✉️ 메일로 맡기기</h2>
           <span className="text-xs text-gray-400">{conn.email} 명의로 발송 · 보낸 즉시 지시로 등록</span>
         </div>
+        {smtpSaved === "saved" && (
+          <div className="mb-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+            보내기(SMTP) 설정을 저장했습니다. 다시 보내보세요.
+          </div>
+        )}
+        {/* SMTP endpoint editor — auto-open when a send just failed */}
+        <details open={error === "send"} className="mb-3 rounded-md border border-gray-100 p-3">
+          <summary className="cursor-pointer text-xs text-gray-500">
+            ⚙ 보내기(SMTP) 설정 — 현재: {conn.smtpHost ?? `${deriveSmtp(conn.host).host} (자동)`}
+            {" : "}{conn.smtpPort ?? `${deriveSmtp(conn.host).port} (자동)`}
+          </summary>
+          <form action={updateSmtpSettings} className="mt-3 flex items-end gap-2">
+            <label className="block flex-1">
+              <span className="text-xs font-medium">SMTP 서버</span>
+              <input name="smtpHost" defaultValue={conn.smtpHost ?? deriveSmtp(conn.host).host} className="input mt-1 w-full" />
+            </label>
+            <label className="block w-24">
+              <span className="text-xs font-medium">포트</span>
+              <input name="smtpPort" type="number" defaultValue={conn.smtpPort ?? deriveSmtp(conn.host).port} className="input mt-1 w-full" />
+            </label>
+            <button className="btn px-3 py-2 text-xs">저장</button>
+          </form>
+          <p className="mt-2 text-xs text-gray-400">
+            회사 서버는 보통 465(SSL) 또는 587 — 방화벽에서 그 포트도 외부에 열려 있어야 합니다. 비밀번호는 다시 입력할 필요 없습니다.
+          </p>
+        </details>
         {error === "send" && (
           <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {why === "auth" && "메일 서버가 로그인(SMTP 인증)을 거부했습니다. 아이디·비밀번호를 확인하세요."}
-            {why === "timeout" && "보내기 서버가 응답하지 않습니다. SMTP 설정(연결 해제 후 재연결)에서 포트를 465 또는 587로 바꿔보세요."}
-            {why === "refused" && "보내기 서버가 접속을 거부했습니다. SMTP 포트를 465 또는 587로 바꿔보세요."}
-            {(why === "dns" || why === "other" || !why) && "메일 발송에 실패했습니다. SMTP 설정을 확인해주세요."}
+            {why === "timeout" && "보내기 서버가 응답하지 않습니다. 위의 ⚙ 보내기(SMTP) 설정에서 포트를 465 또는 587로 바꾸고, 그 포트가 방화벽에 열려 있는지 확인하세요."}
+            {why === "refused" && "보내기 서버가 이 포트를 거부했습니다. 위의 ⚙ 보내기(SMTP) 설정에서 포트를 465 또는 587로 바꿔보세요."}
+            {(why === "dns" || why === "other" || !why) && "메일 발송에 실패했습니다. 위의 ⚙ 보내기(SMTP) 설정을 확인해주세요."}
             {" "}(작성한 내용은 그대로 남아 있습니다)
           </div>
         )}

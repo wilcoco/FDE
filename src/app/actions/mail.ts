@@ -59,6 +59,19 @@ export async function saveMailConnection(formData: FormData) {
   redirect("/mail");
 }
 
+/** Update ONLY the SMTP endpoint — no password re-entry, no reconnect. */
+export async function updateSmtpSettings(formData: FormData) {
+  const { user } = await requireContext();
+  const smtpHost = String(formData.get("smtpHost") ?? "").trim() || null;
+  const smtpPortRaw = Number(formData.get("smtpPort") ?? 0);
+  const smtpPort = smtpPortRaw > 0 ? smtpPortRaw : null;
+  await prisma.mailConnection.updateMany({
+    where: { userId: user.id },
+    data: { smtpHost, smtpPort },
+  });
+  redirect("/mail?smtp=saved");
+}
+
 export async function deleteMailConnection() {
   const { tenant, user } = await requireContext();
   await prisma.mailConnection.deleteMany({ where: { userId: user.id } });
