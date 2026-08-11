@@ -948,6 +948,9 @@ model MailConnection {
   host       String
   port       Int       @default(993)
   email      String
+  /// IMAP login when it differs from the mail address (사내 서버: 아이디 "json",
+  /// 주소 "json@icams.co.kr"). null → log in with `email`.
+  loginUser  String?
   encPass    String
   lastSyncAt DateTime?
   createdAt  DateTime  @default(now())

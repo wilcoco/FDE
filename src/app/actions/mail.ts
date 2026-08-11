@@ -22,13 +22,15 @@ export async function saveMailConnection(formData: FormData) {
   const host = String(formData.get("host") ?? "").trim();
   const port = Number(formData.get("port") ?? 993) || 993;
   const email = String(formData.get("email") ?? "").trim();
+  // 사내 서버: 로그인 아이디가 메일 주소와 다를 수 있음 (빈 값 = 주소로 로그인)
+  const loginUser = String(formData.get("loginUser") ?? "").trim() || null;
   const pass = String(formData.get("password") ?? "");
   if (!host || !email || !pass) redirect("/mail?error=missing");
 
   // verify before saving — a wrong app password should fail HERE, not on every open
   let failure: string | null = null;
   try {
-    await testConnection({ host, port, email, pass });
+    await testConnection({ host, port, email, login: loginUser, pass });
   } catch (e) {
     failure = classifyConnError(e);
   }
@@ -36,8 +38,8 @@ export async function saveMailConnection(formData: FormData) {
 
   await prisma.mailConnection.upsert({
     where: { userId: user.id },
-    create: { tenantId: tenant.id, userId: user.id, host, port, email, encPass: encryptSecret(pass) },
-    update: { host, port, email, encPass: encryptSecret(pass) },
+    create: { tenantId: tenant.id, userId: user.id, host, port, email, loginUser, encPass: encryptSecret(pass) },
+    update: { host, port, email, loginUser, encPass: encryptSecret(pass) },
   });
   await prisma.auditLog.create({
     data: { tenantId: tenant.id, actorId: user.id, action: "MAIL_CONNECTED", target: email },
@@ -78,10 +80,14 @@ export async function registerMailAsSay(formData: FormData) {
 
   const to = toRaw.split(",").map((s) => s.trim()).filter(Boolean);
 
+  const conn = await loadMailConn(user.id);
+  // self-exclusion must use the MAILBOX address (json@icams.co.kr), which can
+  // differ from the FlowDesk account email — otherwise "나"가 상대방으로 잡힘
+  const selfEmail = conn?.email ?? user.email;
+
   let body = "";
-  if (withBody && mailbox && seq > 0) {
-    const conn = await loadMailConn(user.id);
-    if (conn) body = stripQuotedTail(await fetchBody(conn, mailbox, seq).catch(() => ""));
+  if (withBody && mailbox && seq > 0 && conn) {
+    body = stripQuotedTail(await fetchBody(conn, mailbox, seq).catch(() => ""));
   }
 
   let summary = subject;
@@ -103,7 +109,7 @@ export async function registerMailAsSay(formData: FormData) {
         summary,
         source: "EMAIL",
         threadMessageId: messageId,
-        counterparty: counterpartyOf(to, user.email) || null,
+        counterparty: counterpartyOf(to, selfEmail) || null,
       },
     });
     await tx.milestone.createMany({

@@ -9,6 +9,8 @@ export interface ImapConn {
   host: string;
   port: number;
   email: string;
+  /** IMAP login id when it differs from the address (사내 서버: "json"). */
+  login?: string | null;
   pass: string;
 }
 
@@ -22,7 +24,7 @@ function client(conn: ImapConn): ImapFlow {
     host: conn.host,
     port: conn.port,
     secure: true,
-    auth: { user: conn.email, pass: conn.pass },
+    auth: { user: conn.login?.trim() || conn.email, pass: conn.pass },
     logger: false,
     // a hung mail server must not hang the page render — and a firewall that
     // silently DROPS packets must not leave the user staring at nothing for

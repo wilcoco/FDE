@@ -15,6 +15,7 @@ export async function loadMailConn(
     host: row.host,
     port: row.port,
     email: row.email,
+    login: row.loginUser,
     pass: decryptSecret(row.encPass),
     lastSyncAt: row.lastSyncAt,
   };

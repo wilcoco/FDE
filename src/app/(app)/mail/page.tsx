@@ -11,7 +11,7 @@ import PendingButton from "@/components/PendingButton";
 
 // what to tell the user for each connection-failure cause — actionable, not generic
 const CONNECT_HINTS: Record<string, string> = {
-  auth: "서버에는 연결됐지만 로그인이 거부됐습니다. 이메일 주소(전체)와 비밀번호를 확인하세요. 네이버·구글은 원래 비밀번호가 아니라 '앱 비밀번호'가 필요합니다.",
+  auth: "서버에는 연결됐지만 로그인이 거부됐습니다. 사내 서버라면 '로그인 아이디'에 계정 아이디(예: json)를 넣어보세요. 네이버·구글은 원래 비밀번호가 아니라 '앱 비밀번호'가 필요합니다.",
   timeout: "서버가 응답하지 않습니다. 회사 메일이라면 IMAP이 외부망에 안 열려 있을 가능성이 큽니다 — 전산 담당자에게 \"IMAP 993 포트 외부 접속이 되나요?\"라고 확인해보세요.",
   refused: "서버가 이 포트의 접속을 거부했습니다. 포트를 993(안 되면 143)으로 바꿔보세요.",
   dns: "서버 주소를 찾을 수 없습니다. IMAP 서버 주소의 철자를 확인하세요.",
@@ -76,6 +76,15 @@ export default async function MailPage({
           <label className="block">
             <span className="text-sm font-medium">이메일 주소</span>
             <input name="email" type="email" placeholder="me@naver.com" className="input mt-1 w-full" required />
+          </label>
+          <label className="block">
+            <span className="text-sm font-medium">
+              로그인 아이디 <span className="font-normal text-gray-400">(이메일 주소와 다를 때만)</span>
+            </span>
+            <input name="loginUser" placeholder="예: json — 비워두면 이메일 주소로 로그인" className="input mt-1 w-full" />
+            <span className="mt-1 block text-xs text-gray-400">
+              사내 메일서버는 주소(json@회사.co.kr)가 아니라 아이디(json)로 로그인하는 경우가 많습니다.
+            </span>
           </label>
           <label className="block">
             <span className="text-sm font-medium">앱 비밀번호</span>
