@@ -215,6 +215,7 @@ model Tenant {
   milestoneComments MilestoneComment[]
   dataTables     DataTable[]
   dataRows       DataRow[]
+  mailConnections MailConnection[]
 }
 
 model User {
@@ -267,6 +268,7 @@ model User {
   milestoneComments    MilestoneComment[]  @relation("MilestoneCommentAuthor")
   dataTables           DataTable[]         @relation("DataTableAuthor")
   dataRows             DataRow[]           @relation("DataRowAuthor")
+  mailConnection       MailConnection?
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -932,4 +934,26 @@ model StrategySynthesis {
 
   @@index([tenantId])
   @@index([tenantId, createdAt])
+}
+
+/// Per-user IMAP connection for the in-app mail screen (메일 → 지시).
+/// Pull model: mail is fetched ONLY when the user opens the screen — no
+/// background polling, nothing leaves except what the user registers.
+/// The app password is AES-256-GCM encrypted at rest with a key derived
+/// from AUTH_SECRET; only the server can read it.
+model MailConnection {
+  id         String    @id @default(cuid())
+  tenantId   String
+  userId     String    @unique
+  host       String
+  port       Int       @default(993)
+  email      String
+  encPass    String
+  lastSyncAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
 }

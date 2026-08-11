@@ -7,6 +7,7 @@ const NAV = [
   { href: "/instructions", label: "지시 목록" },
   { href: "/strategy", label: "전략 통일성" },
   { href: "/inbox", label: "받은 업무·결재" },
+  { href: "/mail", label: "메일 → 지시" },
   { href: "/dashboard", label: "대시보드" },
   { href: "/objectives", label: "목표 (OKR·KPI)" },
   { href: "/analytics", label: "분석" },

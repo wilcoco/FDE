@@ -42,6 +42,9 @@ async function main() {
   console.log("── connector ──");
   await (await import("./connector.test")).run(t);
 
+  console.log("── crypto ──");
+  await (await import("./crypto.test")).run(t);
+
   console.log("── migrations (embedded Postgres) ──");
   await (await import("./migrations.test")).run(t);
 
