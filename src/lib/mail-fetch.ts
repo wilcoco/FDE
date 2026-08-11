@@ -24,10 +24,25 @@ function client(conn: ImapConn): ImapFlow {
     secure: true,
     auth: { user: conn.email, pass: conn.pass },
     logger: false,
-    // a hung mail server must not hang the page render
+    // a hung mail server must not hang the page render — and a firewall that
+    // silently DROPS packets must not leave the user staring at nothing for
+    // the 90s default connect timeout
+    connectionTimeout: 10_000,
     socketTimeout: 20_000,
     greetingTimeout: 10_000,
   });
+}
+
+/** Why a connection attempt failed, in terms the user can act on. */
+export type ConnFailure = "auth" | "timeout" | "refused" | "dns" | "other";
+
+export function classifyConnError(e: unknown): ConnFailure {
+  const err = e as { code?: string; authenticationFailed?: boolean; message?: string };
+  if (err?.authenticationFailed || /AUTHENTICATIONFAILED|LOGIN failed|Invalid credentials/i.test(err?.message ?? "")) return "auth";
+  if (err?.code === "ENOTFOUND" || err?.code === "EAI_AGAIN") return "dns";
+  if (err?.code === "ECONNREFUSED") return "refused";
+  if (err?.code === "ETIMEDOUT" || err?.code === "CONNECT_TIMEOUT" || /timeout|required time/i.test(err?.message ?? "")) return "timeout";
+  return "other";
 }
 
 /** Verify credentials by connecting and logging out. Throws on failure. */

@@ -7,6 +7,16 @@ import {
   saveMailConnection, deleteMailConnection, registerMailAsSay, syncReplies,
 } from "@/app/actions/mail";
 import { normalizeMessageId } from "@/lib/inbound-email";
+import PendingButton from "@/components/PendingButton";
+
+// what to tell the user for each connection-failure cause — actionable, not generic
+const CONNECT_HINTS: Record<string, string> = {
+  auth: "서버에는 연결됐지만 로그인이 거부됐습니다. 이메일 주소(전체)와 비밀번호를 확인하세요. 네이버·구글은 원래 비밀번호가 아니라 '앱 비밀번호'가 필요합니다.",
+  timeout: "서버가 응답하지 않습니다. 회사 메일이라면 IMAP이 외부망에 안 열려 있을 가능성이 큽니다 — 전산 담당자에게 \"IMAP 993 포트 외부 접속이 되나요?\"라고 확인해보세요.",
+  refused: "서버가 이 포트의 접속을 거부했습니다. 포트를 993(안 되면 143)으로 바꿔보세요.",
+  dns: "서버 주소를 찾을 수 없습니다. IMAP 서버 주소의 철자를 확인하세요.",
+  other: "메일 서버 접속에 실패했습니다. 주소·포트·이메일·비밀번호를 확인해주세요.",
+};
 
 export const dynamic = "force-dynamic";
 
@@ -18,10 +28,10 @@ export const dynamic = "force-dynamic";
 export default async function MailPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; synced?: string }>;
+  searchParams: Promise<{ error?: string; synced?: string; why?: string }>;
 }) {
   const { tenant, user } = await requireContext();
-  const { error, synced } = await searchParams;
+  const { error, synced, why } = await searchParams;
   const conn = await loadMailConn(user.id);
 
   // ── not connected yet: setup ──
@@ -43,7 +53,7 @@ export default async function MailPage({
 
         {error === "connect" && (
           <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            메일 서버 접속에 실패했습니다. 주소·이메일·앱 비밀번호를 확인해주세요.
+            {CONNECT_HINTS[why ?? "other"] ?? CONNECT_HINTS.other}
           </div>
         )}
         {error === "missing" && (
@@ -75,7 +85,7 @@ export default async function MailPage({
               (네이버: imap.naver.com · 다음: imap.daum.net · 구글: imap.gmail.com — 구글은 2단계 인증 후 앱 비밀번호 필요)
             </span>
           </label>
-          <button className="btn w-full">연결하기</button>
+          <PendingButton pendingLabel="연결 확인 중… (최대 10초)">연결하기</PendingButton>
         </form>
       </div>
     );
@@ -129,7 +139,9 @@ export default async function MailPage({
           이 화면을 열 때만 메일함을 읽습니다 · 기본은 메타데이터만 저장
         </span>
         <form action={syncReplies}>
-          <button className="btn px-3 py-1.5 text-sm">🔄 답장 확인</button>
+          <PendingButton pendingLabel="받은편지함 확인 중…" className="btn px-3 py-1.5 text-sm">
+            🔄 답장 확인
+          </PendingButton>
         </form>
       </div>
 

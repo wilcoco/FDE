@@ -11,7 +11,7 @@ import { prisma } from "@/lib/db";
 import { requireContext } from "@/lib/session";
 import { encryptSecret } from "@/lib/crypto";
 import { loadMailConn } from "@/lib/mail-conn";
-import { testConnection, listRecentInbox, fetchBody } from "@/lib/mail-fetch";
+import { testConnection, listRecentInbox, fetchBody, classifyConnError } from "@/lib/mail-fetch";
 import { counterpartyOf, extractThreadRefs, normalizeMessageId, stripQuotedTail } from "@/lib/inbound-email";
 import { generateMilestones } from "@/lib/ai";
 import { notify, notifyEmail } from "@/lib/notify";
@@ -26,11 +26,13 @@ export async function saveMailConnection(formData: FormData) {
   if (!host || !email || !pass) redirect("/mail?error=missing");
 
   // verify before saving — a wrong app password should fail HERE, not on every open
+  let failure: string | null = null;
   try {
     await testConnection({ host, port, email, pass });
-  } catch {
-    redirect("/mail?error=connect");
+  } catch (e) {
+    failure = classifyConnError(e);
   }
+  if (failure) redirect(`/mail?error=connect&why=${failure}`);
 
   await prisma.mailConnection.upsert({
     where: { userId: user.id },
