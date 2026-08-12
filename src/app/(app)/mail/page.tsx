@@ -9,6 +9,7 @@ import {
 import { deriveSmtp } from "@/lib/smtp";
 import { normalizeMessageId } from "@/lib/inbound-email";
 import { capabilitiesFor, MAIL_PRESETS } from "@/lib/mail-capabilities";
+import { gmailOAuthConfigured } from "@/lib/gmail";
 import PendingButton from "@/components/PendingButton";
 
 // what to tell the user for each connection-failure cause — actionable, not generic
@@ -31,14 +32,14 @@ export default async function MailPage({
   searchParams,
 }: {
   searchParams: Promise<{
-    error?: string; synced?: string; why?: string; preset?: string; smtp?: string; detail?: string;
+    error?: string; synced?: string; why?: string; preset?: string; smtp?: string; detail?: string; connected?: string;
     host?: string; port?: string; email?: string; login?: string; // echoed back on failure
     to?: string; subject?: string; body?: string; // compose echo on send failure
   }>;
 }) {
   const { tenant, user } = await requireContext();
   const {
-    error, synced, why, preset, smtp: smtpSaved, detail,
+    error, synced, why, preset, smtp: smtpSaved, detail, connected,
     host: prevHost, port: prevPort, email: prevEmail, login: prevLogin,
     to: prevTo, subject: prevSubject, body: prevBody,
   } = await searchParams;
@@ -57,6 +58,21 @@ export default async function MailPage({
             내 메일함에서 보낸 메일을 불러와 지시로 등록하고, 답장이 왔는지 추적합니다.
           </p>
         </div>
+
+        {gmailOAuthConfigured() && (
+          <a
+            href="/api/mail/google"
+            className="flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-3 text-sm font-medium shadow-sm transition hover:bg-gray-50"
+          >
+            <span className="text-lg">🇬</span> Google 계정으로 메일 연결 (비밀번호 불필요)
+          </a>
+        )}
+        {(error === "oauth_state" || error === "oauth_exchange" || error === "oauth_norefresh") && (
+          <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            Google 연결에 실패했습니다. 다시 시도해주세요.
+            {error === "oauth_exchange" && " (테스트 사용자로 등록된 계정인지 확인하세요)"}
+          </div>
+        )}
 
         {/* provider presets — set expectations BEFORE the user types anything */}
         <div>
@@ -159,8 +175,9 @@ export default async function MailPage({
   }
 
   // ── connected: fetch mail NOW (because the user opened this screen) ──
+  const isGmailConn = conn.provider === "gmail" && !!conn.refresh;
   const caps = capabilitiesFor(conn.port);
-  const isPop3 = caps.protocol === "pop3";
+  const isPop3 = !isGmailConn && caps.protocol === "pop3";
   let mails: ListedMail[] = [];
   let fetchError: string | null = null;
   try {
@@ -210,8 +227,19 @@ export default async function MailPage({
         <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">메일 연결이 없습니다.</div>
       )}
 
+      {connected === "gmail" && (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          Google 계정이 연결됐습니다 — 비밀번호 없이 메일 추적이 시작됩니다.
+        </div>
+      )}
+
       {/* capability card — the honest contract for THIS server */}
-      {isPop3 ? (
+      {isGmailConn ? (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+          Google 연결(OAuth) — 보낸메일 자동 표시 · 답장 감지 · 앱에서 발송.
+          본문은 구글 권한 정책상 읽을 수 없습니다(제목·수신자만) — 프라이버시가 구글 차원에서 보장됩니다.
+        </div>
+      ) : isPop3 ? (
         <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-xs leading-5 text-sky-900">
           <div className="mb-2 font-semibold">이 서버는 POP3만 지원합니다 — 되는 것과 안 되는 것</div>
           <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
@@ -242,7 +270,8 @@ export default async function MailPage({
             보내기(SMTP) 설정을 저장했습니다. 다시 보내보세요.
           </div>
         )}
-        {/* SMTP endpoint editor — auto-open when a send just failed */}
+        {/* SMTP endpoint editor — auto-open when a send just failed (not for Gmail OAuth) */}
+        {!isGmailConn && (
         <details open={error === "send"} className="mb-3 rounded-md border border-gray-100 p-3">
           <summary className="cursor-pointer text-xs text-gray-500">
             ⚙ 보내기(SMTP) 설정 — 현재: {conn.smtpHost ?? `${deriveSmtp(conn.host).host} (자동)`}
@@ -268,6 +297,7 @@ export default async function MailPage({
             &quot;자체서명 인증서 허용&quot;은 사내 서버가 정식 SSL 인증서 없이 운영될 때만 켜세요.
           </p>
         </details>
+        )}
         {error === "send" && (
           <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {why === "auth" && "메일 서버가 로그인(SMTP 인증)을 거부했습니다. 아이디(전체 주소·짧은 아이디 모두 자동 시도됨)·비밀번호를 확인하고, 사내 서버라면 메일서버 관리자 화면의 [계정 보안 관리]에서 이 계정의 SMTP 인증이 허용돼 있는지 확인하세요."}
@@ -385,6 +415,7 @@ export default async function MailPage({
                     <input type="hidden" name="uid" value={m.uid ?? ""} />
                     <button className="btn px-2 py-1 text-xs" title="제목·받는사람만 저장">지시로 등록</button>
                   </form>
+                  {!isGmailConn && (
                   <form action={registerMailAsSay}>
                     <input type="hidden" name="messageId" value={m.messageId} />
                     <input type="hidden" name="subject" value={m.subject ?? ""} />
@@ -400,6 +431,7 @@ export default async function MailPage({
                       +본문
                     </button>
                   </form>
+                  )}
                 </div>
               )}
             </div>

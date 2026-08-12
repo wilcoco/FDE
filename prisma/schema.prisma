@@ -956,6 +956,10 @@ model MailConnection {
   smtpPort   Int?
   /// 사내 서버의 자체서명(SSL) 인증서 허용 — 사용자가 명시적으로 켠 경우만.
   smtpAllowSelfSigned Boolean @default(false)
+  /// "imap" (host/port 기반, POP3 포함) | "gmail" (OAuth, Gmail API)
+  provider   String    @default("imap")
+  /// OAuth refresh token, AES-256-GCM encrypted (gmail provider only)
+  encRefresh String?
   encPass    String
   lastSyncAt DateTime?
   createdAt  DateTime  @default(now())

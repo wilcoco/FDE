@@ -14,6 +14,7 @@ import { loadMailConn } from "@/lib/mail-conn";
 import { testConnection, listRecentInbox, fetchBody, appendToSent, classifyConnError, connErrorDetail, protocolFor } from "@/lib/mail-fetch";
 import { pop3Test } from "@/lib/pop3";
 import { smtpSend, buildMessage, deriveSmtp } from "@/lib/smtp";
+import { refreshAccessToken, gmailSendRaw } from "@/lib/gmail";
 import { detectEndpoints } from "@/lib/mail-autodetect";
 import { randomUUID } from "node:crypto";
 import { counterpartyOf, extractThreadRefs, normalizeMessageId, stripQuotedTail, pickInstructionForReply, normalizeEmail } from "@/lib/inbound-email";
@@ -210,7 +211,8 @@ export async function composeAndSend(formData: FormData) {
   const individual = formData.get("individual") === "on" && to.length > 1;
   if (to.length === 0 || !subject) redirect("/mail?error=compose_missing");
 
-  const isPop3 = protocolFor(conn.port) === "pop3";
+  const isGmailConn = conn.provider === "gmail" && !!conn.refresh;
+  const isPop3 = !isGmailConn && protocolFor(conn.port) === "pop3";
   const smtp = {
     host: conn.smtpHost ?? deriveSmtp(conn.host).host,
     port: conn.smtpPort ?? deriveSmtp(conn.host).port,
@@ -278,7 +280,7 @@ export async function composeAndSend(formData: FormData) {
 
   const createdIds: string[] = [];
   for (const [i, batch] of batches.entries()) {
-    const messageId = `fd-${randomUUID()}@${domain}`;
+    let messageId = `fd-${randomUUID()}@${domain}`;
     const mail = {
       from: conn.email,
       to: batch.rcpts,
@@ -288,7 +290,14 @@ export async function composeAndSend(formData: FormData) {
       messageId,
     };
     try {
-      await smtpSend(smtp, mail);
+      if (isGmailConn) {
+        // Gmail may rewrite the Message-ID — track what it actually stored,
+        // because the counterparty's reply will reference THAT id
+        const accessToken = await refreshAccessToken(conn.refresh!);
+        messageId = await gmailSendRaw(accessToken, buildMessage(mail));
+      } else {
+        await smtpSend(smtp, mail);
+      }
     } catch (e) {
       const why = classifyConnError(e);
       // partial failure: report what went out and what didn't, keep the draft
@@ -299,7 +308,7 @@ export async function composeAndSend(formData: FormData) {
       });
       redirect(`/mail?${echo.toString()}`);
     }
-    if (!isPop3) void appendToSent(conn, buildMessage(mail)).catch(() => {});
+    if (!isPop3 && !isGmailConn) void appendToSent(conn, buildMessage(mail)).catch(() => {});
     const inst = await createInstruction(messageId, batch.counterparty);
     createdIds.push(inst.id);
   }

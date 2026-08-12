@@ -6,6 +6,7 @@ import { ImapFlow } from "imapflow";
 import { pickSentMailbox, type MailEnvelope } from "./connector";
 import { pop3Test, pop3ListRecent, pop3FetchRaw } from "./pop3";
 import { headersToEnvelope, extractTextBody } from "./mail-headers";
+import { refreshAccessToken, gmailListRecent } from "./gmail";
 
 export interface ImapConn {
   host: string;
@@ -14,6 +15,14 @@ export interface ImapConn {
   /** IMAP login id when it differs from the address (사내 서버: "json"). */
   login?: string | null;
   pass: string;
+  /** "gmail" switches all fetch paths to the Gmail API (OAuth). */
+  provider?: string;
+  /** decrypted OAuth refresh token (gmail only) */
+  refresh?: string | null;
+}
+
+function isGmail(conn: ImapConn): boolean {
+  return conn.provider === "gmail" && !!conn.refresh;
 }
 
 export interface ListedMail extends MailEnvelope {
@@ -84,6 +93,7 @@ function pop3ConnOf(conn: ImapConn) {
 
 /** Verify credentials by connecting and logging out. Throws on failure. */
 export async function testConnection(conn: ImapConn): Promise<void> {
+  if (isGmail(conn)) { await refreshAccessToken(conn.refresh!); return; }
   if (protocolFor(conn.port) === "pop3") return pop3Test(pop3ConnOf(conn));
   const c = client(conn);
   await c.connect();
@@ -137,6 +147,7 @@ async function pop3Recent(conn: ImapConn, n: number): Promise<ListedMail[]> {
  * page explains the habit.
  */
 export async function listRecentSent(conn: ImapConn, n = 20): Promise<ListedMail[]> {
+  if (isGmail(conn)) return gmailListRecent(await refreshAccessToken(conn.refresh!), "SENT", n);
   if (protocolFor(conn.port) === "pop3") return pop3Recent(conn, n);
   const c = client(conn);
   await c.connect();
@@ -152,6 +163,7 @@ export async function listRecentSent(conn: ImapConn, n = 20): Promise<ListedMail
 
 /** Recent inbox mail — used to detect replies to tracked threads. */
 export async function listRecentInbox(conn: ImapConn, n = 30): Promise<ListedMail[]> {
+  if (isGmail(conn)) return gmailListRecent(await refreshAccessToken(conn.refresh!), "INBOX", n);
   if (protocolFor(conn.port) === "pop3") return pop3Recent(conn, n);
   const c = client(conn);
   await c.connect();
@@ -168,6 +180,7 @@ export async function listRecentInbox(conn: ImapConn, n = 30): Promise<ListedMai
  * Best-effort — a failure here must never fail the send itself.
  */
 export async function appendToSent(conn: ImapConn, rawMessage: string): Promise<void> {
+  if (isGmail(conn)) return; // Gmail API stores sent mail itself
   if (protocolFor(conn.port) === "pop3") return; // no folders in POP3
   const c = client(conn);
   await c.connect();
@@ -183,6 +196,9 @@ export async function appendToSent(conn: ImapConn, rawMessage: string): Promise<
 
 /** Body of one specific mail — fetched ONLY on per-mail opt-in. */
 export async function fetchBody(conn: ImapConn, mailbox: string, seq: number, uid?: string): Promise<string> {
+  // gmail.metadata scope is structurally unable to fetch bodies — the privacy
+  // guarantee is enforced by Google, not by our restraint
+  if (isGmail(conn)) return "";
   if (protocolFor(conn.port) === "pop3") {
     if (!uid) return "";
     const raw = await pop3FetchRaw(pop3ConnOf(conn), uid);
