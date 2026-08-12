@@ -33,6 +33,8 @@ export interface OutgoingMail {
   html?: string;
   /** bare parent Message-ID → In-Reply-To/References (스레드에 끼워넣기) */
   inReplyTo?: string;
+  /** real file attachments → multipart/mixed (직답 첨부 전달용) */
+  attachments?: { name: string; mime: string; dataB64: string }[];
   messageId: string; // bare form, no angle brackets
 }
 
@@ -63,32 +65,59 @@ export function buildMessage(m: OutgoingMail, now = new Date()): string {
     `Date: ${now.toUTCString().replace("GMT", "+0000")}`,
     "MIME-Version: 1.0",
   ];
+  const stem = m.messageId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 24);
+
+  // innermost content: plain text, or alternative(text+html)
+  let contentHead: string[];
+  let contentBody: string[];
   if (!m.html) {
-    return [
-      ...head,
+    contentHead = ["Content-Type: text/plain; charset=utf-8", "Content-Transfer-Encoding: base64"];
+    contentBody = [b64(m.text)];
+  } else {
+    const alt = `alt-${stem}`;
+    contentHead = [`Content-Type: multipart/alternative; boundary="${alt}"`];
+    contentBody = [
+      `--${alt}`,
       "Content-Type: text/plain; charset=utf-8",
       "Content-Transfer-Encoding: base64",
       "",
       b64(m.text),
-    ].join("\r\n");
+      `--${alt}`,
+      "Content-Type: text/html; charset=utf-8",
+      "Content-Transfer-Encoding: base64",
+      "",
+      b64(m.html),
+      `--${alt}--`,
+    ];
   }
-  const boundary = `bnd-${m.messageId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 24)}`;
-  return [
+
+  if (!m.attachments?.length) {
+    return [...head, ...contentHead, "", ...contentBody].join("\r\n");
+  }
+
+  // attachments wrap everything in multipart/mixed
+  const mixed = `mix-${stem}`;
+  const parts: string[] = [
     ...head,
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    `Content-Type: multipart/mixed; boundary="${mixed}"`,
     "",
-    `--${boundary}`,
-    "Content-Type: text/plain; charset=utf-8",
-    "Content-Transfer-Encoding: base64",
+    `--${mixed}`,
+    ...contentHead,
     "",
-    b64(m.text),
-    `--${boundary}`,
-    "Content-Type: text/html; charset=utf-8",
-    "Content-Transfer-Encoding: base64",
-    "",
-    b64(m.html),
-    `--${boundary}--`,
-  ].join("\r\n");
+    ...contentBody,
+  ];
+  for (const a of m.attachments) {
+    parts.push(
+      `--${mixed}`,
+      `Content-Type: ${a.mime || "application/octet-stream"}; name="${encodeHeaderWord(a.name)}"`,
+      "Content-Transfer-Encoding: base64",
+      `Content-Disposition: attachment; filename="${encodeHeaderWord(a.name)}"`,
+      "",
+      a.dataB64.replace(/(.{76})/g, "$1\r\n"),
+    );
+  }
+  parts.push(`--${mixed}--`);
+  return parts.join("\r\n");
 }
 
 interface Wire {

@@ -218,6 +218,22 @@ export async function run(t: (name: string, fn: () => void | Promise<void>) => v
     srv5.close();
   });
 
+  await t("buildMessage: attachments → multipart/mixed wrapping alternative", () => {
+    const pdf = Buffer.from("fake-pdf-bytes");
+    const msg = buildMessage({
+      from: "a@b", to: ["c@d"], subject: "s", text: "본문", html: "<p>본문</p>",
+      inReplyTo: "parent@x",
+      attachments: [{ name: "견적서.pdf", mime: "application/pdf", dataB64: pdf.toString("base64") }],
+      messageId: "m5@x",
+    });
+    assert.match(msg, /multipart\/mixed/);
+    assert.match(msg, /multipart\/alternative/);
+    assert.match(msg, /In-Reply-To: <parent@x>/);
+    assert.match(msg, /Content-Disposition: attachment/);
+    assert.ok(msg.includes(pdf.toString("base64")), "file bytes present");
+    assert.match(msg, /filename="=\?UTF-8\?B\?/); // 한글 파일명 encoded
+  });
+
   await t("deriveSmtp: known providers mapped, company falls back to same host:587", () => {
     assert.deepEqual(deriveSmtp("imap.naver.com"), { host: "smtp.naver.com", port: 465 });
     assert.deepEqual(deriveSmtp("imap.gmail.com"), { host: "smtp.gmail.com", port: 465 });

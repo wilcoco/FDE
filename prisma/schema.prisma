@@ -815,6 +815,7 @@ model Instruction {
   parentMilestone Milestone? @relation("MilestoneSubInstructions", fields: [parentMilestoneId], references: [id], onDelete: SetNull)
   milestones Milestone[]
   comments   MilestoneComment[]
+  replyFiles ReplyFile[]
 
   @@index([tenantId])
   @@index([tenantId, createdAt])
@@ -937,6 +938,24 @@ model StrategySynthesis {
 
   @@index([tenantId])
   @@index([tenantId, createdAt])
+}
+
+/// 직답 첨부파일 — 계정 없는 상대방이 답변 페이지에서 올린 파일.
+/// 베타: DB 저장(파일당 5MB 캡). 규모가 생기면 S3/R2로 이전.
+model ReplyFile {
+  id            String   @id @default(cuid())
+  tenantId      String
+  instructionId String
+  name          String
+  mime          String
+  size          Int
+  data          Bytes
+  createdAt     DateTime @default(now())
+
+  instruction Instruction @relation(fields: [instructionId], references: [id], onDelete: Cascade)
+
+  @@index([instructionId])
+  @@index([tenantId])
 }
 
 /// Per-user IMAP connection for the in-app mail screen (메일 → 지시).

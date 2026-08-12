@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
   experimental: {
     // Keep server actions enabled (default in Next 15) and allow large form bodies.
     serverActions: {
-      bodySizeLimit: "2mb",
+      bodySizeLimit: "20mb", // 직답 첨부 3×5MB + base64 여유
     },
   },
 };

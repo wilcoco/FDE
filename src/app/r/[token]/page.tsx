@@ -1,6 +1,4 @@
 import { prisma } from "@/lib/db";
-import { submitExternalReply } from "@/app/actions/external-reply";
-import PendingButton from "@/components/PendingButton";
 
 export const dynamic = "force-dynamic";
 
@@ -44,8 +42,8 @@ export default async function ReplyPage({
         <div className="text-3xl">✅</div>
         <h1 className="mt-2 text-lg font-bold">답변이 전달되었습니다</h1>
         <p className="mt-2 text-sm text-gray-500">
-          {inst.author.name}님께 바로 전달됐습니다. 이 창은 닫으셔도 됩니다.
-          추가로 전할 내용이 생기면 같은 링크에서 다시 답변할 수 있습니다.
+          {inst.author.name}님께 바로 전달됐고, 증빙용으로 메일 스레드에도 자동 기록됩니다.
+          이 창은 닫으셔도 됩니다. 추가로 전할 내용이 생기면 같은 링크에서 다시 답변할 수 있습니다.
         </p>
       </Shell>
     );
@@ -63,14 +61,18 @@ export default async function ReplyPage({
         </p>
       )}
 
+      {error === "file" && (
+        <div className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          첨부는 최대 3개, 파일당 5MB까지 가능합니다.
+        </div>
+      )}
       {error === "empty" && (
         <div className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           답변 내용을 입력해주세요.
         </div>
       )}
 
-      <form action={submitExternalReply} className="mt-5 space-y-3">
-        <input type="hidden" name="token" value={token} />
+      <form action={`/api/reply/${token}`} method="post" encType="multipart/form-data" className="mt-5 space-y-3">
         <input
           name="responder"
           placeholder="성함 (선택)"
@@ -83,12 +85,20 @@ export default async function ReplyPage({
           placeholder="답변을 입력하세요 — 보내는 즉시 상대방의 확인함에 기록됩니다."
           className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm leading-6 focus:border-indigo-500 focus:outline-none"
         />
-        <PendingButton pendingLabel="전달 중…" className="w-full rounded-md bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">
+        <label className="block">
+          <span className="text-xs font-medium text-gray-600">첨부파일 (선택 · 최대 3개, 각 5MB)</span>
+          <input
+            type="file" name="files" multiple
+            className="mt-1 block w-full text-xs text-gray-500 file:mr-3 file:rounded-md file:border-0 file:bg-indigo-50 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-indigo-600"
+          />
+        </label>
+        <button className="w-full rounded-md bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">
           답변 보내기
-        </PendingButton>
+        </button>
       </form>
-      <p className="mt-3 text-center text-xs text-gray-400">
-        가입·로그인 없이 전달됩니다 · 메일로 회신하셔도 됩니다
+      <p className="mt-3 text-center text-xs leading-5 text-gray-400">
+        가입·로그인 없이 즉시 전달됩니다. 증빙을 위해 답변 내용과 첨부파일은
+        원래 메일 스레드에도 자동으로 기록되니, 별도의 메일 회신은 필요 없습니다.
       </p>
     </Shell>
   );
