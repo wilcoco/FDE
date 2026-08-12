@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { processExternalReply, type ReplyUpload } from "@/lib/external-reply-core";
+import { appUrl } from "@/lib/app-url";
 
 // Node 18 (Railway) has no global File — duck-type instead of instanceof
 function isUpload(v: unknown): v is Blob & { name: string; size: number } {
@@ -11,7 +12,8 @@ function isUpload(v: unknown): v is Blob & { name: string; size: number } {
 // 서버 액션이 아닌 라우트로 받는 이유: 파일 업로드는 이 경로가 견고하다.
 export async function POST(req: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  const back = (q: string) => NextResponse.redirect(new URL(`/r/${token}?${q}`, req.url), 303);
+  // 절대주소는 반드시 appUrl() 기준 — 프록시 뒤에서 req.url은 내부 localhost다
+  const back = (q: string) => NextResponse.redirect(new URL(`/r/${token}?${q}`, appUrl()), 303);
 
   let form: FormData;
   try {
@@ -30,6 +32,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
 
   const result = await processExternalReply(token, content, responder, files);
   if (result === "ok") return back("done=1");
-  if (result === "invalid") return NextResponse.redirect(new URL("/r/invalid", req.url), 303);
+  if (result === "invalid") return NextResponse.redirect(new URL("/r/invalid", appUrl()), 303);
   return back(`error=${result}`);
 }
