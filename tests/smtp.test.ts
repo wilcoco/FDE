@@ -147,6 +147,77 @@ export async function run(t: (name: string, fn: () => void | Promise<void>) => v
     srv3.close();
   });
 
+  await t("AUTH username retry: bare id rejected, full address accepted", async () => {
+    const picky: Captured = { rcpts: [], data: "", authUser: "" };
+    const srv4 = net.createServer((sock) => {
+      sock.on("error", () => {});
+      let inData = false, buf = "", stage = 0, user = "";
+      sock.write("220 picky\r\n");
+      sock.on("data", (d) => {
+        const chunk = d.toString();
+        if (inData) {
+          buf += chunk;
+          if (buf.includes("\r\n.\r\n")) { picky.data = buf.split("\r\n.\r\n")[0]; inData = false; sock.write("250 queued\r\n"); }
+          return;
+        }
+        for (const line of chunk.split("\r\n").filter(Boolean)) {
+          const up = line.toUpperCase();
+          if (up.startsWith("EHLO")) sock.write("250-picky\r\n250 AUTH LOGIN\r\n");
+          else if (up === "AUTH LOGIN") { stage = 1; sock.write("334 u\r\n"); }
+          else if (stage === 1) { user = Buffer.from(line, "base64").toString(); stage = 2; sock.write("334 p\r\n"); }
+          else if (stage === 2) {
+            stage = 0;
+            // Nmail-style: only the FULL address logs in; bare id → "503 Authentication failed"
+            if (user === "json@icams.co.kr") { picky.authUser = user; sock.write("235 ok\r\n"); }
+            else sock.write("503 Authentication failed\r\n");
+          }
+          else if (up.startsWith("RCPT TO")) { picky.rcpts.push(line); sock.write("250 ok\r\n"); }
+          else if (up === "DATA") { inData = true; buf = ""; sock.write("354 go\r\n"); }
+          else if (up === "QUIT") { sock.write("221\r\n"); sock.end(); }
+          else sock.write("250 ok\r\n");
+        }
+      });
+    });
+    await new Promise((r) => srv4.listen(12528, "127.0.0.1", () => r(null)));
+    await smtpSend(
+      { host: "127.0.0.1", port: 12528, user: "json", pass: "pw", authAlternates: ["json@icams.co.kr", "json"] },
+      { from: "json@icams.co.kr", to: ["v@x.com"], subject: "s", text: "t", messageId: "m3@x" },
+    );
+    assert.equal(picky.authUser, "json@icams.co.kr"); // second candidate won
+    assert.equal(picky.rcpts.length, 1);
+    srv4.close();
+  });
+
+  await t("AUTH: every username form rejected → authenticationFailed thrown", async () => {
+    const srv5 = net.createServer((sock) => {
+      sock.on("error", () => {});
+      let stage = 0;
+      sock.write("220 x\r\n");
+      sock.on("data", (d) => {
+        for (const line of d.toString().split("\r\n").filter(Boolean)) {
+          const up = line.toUpperCase();
+          if (up.startsWith("EHLO")) sock.write("250-x\r\n250 AUTH LOGIN\r\n");
+          else if (up === "AUTH LOGIN") { stage = 1; sock.write("334 u\r\n"); }
+          else if (stage === 1) { stage = 2; sock.write("334 p\r\n"); }
+          else if (stage === 2) { stage = 0; sock.write("503 Authentication failed\r\n"); }
+          else if (up === "QUIT") { sock.write("221\r\n"); sock.end(); }
+          else sock.write("250 ok\r\n");
+        }
+      });
+    });
+    await new Promise((r) => srv5.listen(12529, "127.0.0.1", () => r(null)));
+    try {
+      await smtpSend(
+        { host: "127.0.0.1", port: 12529, user: "json", pass: "pw", authAlternates: ["json@icams.co.kr"] },
+        { from: "a@b", to: ["c@d"], subject: "s", text: "t", messageId: "m4@x" },
+      );
+      assert.fail("should throw");
+    } catch (e) {
+      assert.equal((e as { authenticationFailed?: boolean }).authenticationFailed, true);
+    }
+    srv5.close();
+  });
+
   await t("deriveSmtp: known providers mapped, company falls back to same host:587", () => {
     assert.deepEqual(deriveSmtp("imap.naver.com"), { host: "smtp.naver.com", port: 465 });
     assert.deepEqual(deriveSmtp("imap.gmail.com"), { host: "smtp.gmail.com", port: 465 });

@@ -15,6 +15,12 @@ export interface SmtpConfig {
   pass: string;
   /** 사내 서버 자체서명 인증서 허용 — 사용자가 명시적으로 켠 경우만 true. */
   allowSelfSigned?: boolean;
+  /**
+   * Alternate AUTH usernames to retry on auth failure — servers disagree on
+   * whether SMTP wants the bare id ("json") or the full address
+   * ("json@icams.co.kr"), and often differ from their own POP3.
+   */
+  authAlternates?: string[];
 }
 
 export interface OutgoingMail {
@@ -109,7 +115,9 @@ async function openWire(host: string, port: number, allowSelfSigned = false): Pr
       if (!expect.includes(code)) {
         const err = connError("ERR_RESPONSE", res.trim().slice(0, 200)) as Error & { code: string; authenticationFailed?: boolean; smtpCode?: number };
         err.smtpCode = code;
-        if (code === 535 || code === 534 || code === 530) err.authenticationFailed = true;
+        // 535/534/530 are the standard auth-failure codes; legacy servers
+        // (Nmail) also say things like "503 Authentication failed"
+        if (code === 535 || code === 534 || code === 530 || /authentication/i.test(res)) err.authenticationFailed = true;
         throw err;
       }
       return res;
@@ -139,13 +147,32 @@ export async function smtpSend(cfg: SmtpConfig, mail: OutgoingMail): Promise<voi
       await wire.upgrade();
       ehlo = await wire.send(`EHLO flowdesk.local`, [250]);
     }
-    // AUTH LOGIN only when the server offers it — old Korean servers (Nmail)
-    // may use POP-before-SMTP instead and reject the AUTH verb outright
-    if (/AUTH[ =][^\r\n]*LOGIN/i.test(ehlo)) {
-      await wire.send("AUTH LOGIN", [334]);
-      await wire.send(Buffer.from(cfg.user).toString("base64"), [334]);
-      await wire.send(Buffer.from(cfg.pass).toString("base64"), [235]);
+    // AUTH: try each username form (bare id vs full address — servers differ,
+    // and often differ from their own POP3). A server without AUTH answers the
+    // verb with 500/502; that's fine — POP-before-SMTP may authorize instead.
+    const candidates = [cfg.user, ...(cfg.authAlternates ?? [])]
+      .map((u) => u.trim()).filter(Boolean)
+      .filter((u, i, arr) => arr.indexOf(u) === i);
+    const advertised = /AUTH[ =][^\r\n]*(LOGIN|PLAIN)/i.test(ehlo);
+    let lastAuthErr: unknown = null;
+    for (const [i, candidate] of candidates.entries()) {
+      try {
+        await wire.send("AUTH LOGIN", [334]);
+        await wire.send(Buffer.from(candidate).toString("base64"), [334]);
+        await wire.send(Buffer.from(cfg.pass).toString("base64"), [235]);
+        lastAuthErr = null;
+        break;
+      } catch (e) {
+        const code = (e as { smtpCode?: number }).smtpCode ?? 0;
+        // 500/502 = no such verb → server has no AUTH at all; stop trying
+        if (code === 500 || code === 502) { lastAuthErr = null; break; }
+        lastAuthErr = e;
+        if (i === candidates.length - 1 && advertised) throw e; // all forms rejected
+      }
     }
+    // AUTH not advertised and all attempts bounced → proceed unauthenticated;
+    // if the server truly requires auth, MAIL FROM will say so explicitly
+    void lastAuthErr;
 
     await wire.send(`MAIL FROM:<${mail.from}>`, [250]);
     for (const rcpt of [...mail.to, ...(mail.bcc ?? [])]) {

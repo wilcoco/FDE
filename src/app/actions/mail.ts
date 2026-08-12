@@ -217,6 +217,8 @@ export async function composeAndSend(formData: FormData) {
     user: conn.login?.trim() || conn.email,
     pass: conn.pass,
     allowSelfSigned: conn.smtpAllowSelfSigned,
+    // servers disagree on bare id vs full address for SMTP AUTH — retry all forms
+    authAlternates: [conn.email, conn.email.split("@")[0]],
   };
   const domain = conn.email.split("@")[1] ?? "flowdesk.local";
 
