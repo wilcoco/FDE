@@ -12,7 +12,8 @@ export async function POST(req: Request) {
 
   const form = await req.formData();
   const file = form.get("audio");
-  if (!(file instanceof File)) return Response.json({ error: "오디오 파일이 필요합니다" }, { status: 400 });
+  const isBlobLike = !!file && typeof file === "object" && typeof (file as Blob).arrayBuffer === "function";
+  if (!isBlobLike) return Response.json({ error: "오디오 파일이 필요합니다" }, { status: 400 });
   if (file.size > MAX_BYTES) return Response.json({ error: "파일이 너무 큽니다 (25MB 초과)" }, { status: 413 });
 
   try {
