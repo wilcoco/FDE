@@ -31,14 +31,14 @@ export default async function MailPage({
   searchParams,
 }: {
   searchParams: Promise<{
-    error?: string; synced?: string; why?: string; preset?: string; smtp?: string;
+    error?: string; synced?: string; why?: string; preset?: string; smtp?: string; detail?: string;
     host?: string; port?: string; email?: string; login?: string; // echoed back on failure
     to?: string; subject?: string; body?: string; // compose echo on send failure
   }>;
 }) {
   const { tenant, user } = await requireContext();
   const {
-    error, synced, why, preset, smtp: smtpSaved,
+    error, synced, why, preset, smtp: smtpSaved, detail,
     host: prevHost, port: prevPort, email: prevEmail, login: prevLogin,
     to: prevTo, subject: prevSubject, body: prevBody,
   } = await searchParams;
@@ -257,19 +257,30 @@ export default async function MailPage({
               <span className="text-xs font-medium">포트</span>
               <input name="smtpPort" type="number" defaultValue={conn.smtpPort ?? deriveSmtp(conn.host).port} className="input mt-1 w-full" />
             </label>
+            <label className="flex items-center gap-1.5 whitespace-nowrap pb-2.5 text-xs text-gray-600">
+              <input type="checkbox" name="allowSelfSigned" defaultChecked={conn.smtpAllowSelfSigned} className="h-3.5 w-3.5 accent-indigo-600" />
+              자체서명 인증서 허용
+            </label>
             <button className="btn px-3 py-2 text-xs">저장</button>
           </form>
           <p className="mt-2 text-xs text-gray-400">
             회사 서버는 보통 465(SSL) 또는 587 — 방화벽에서 그 포트도 외부에 열려 있어야 합니다. 비밀번호는 다시 입력할 필요 없습니다.
+            &quot;자체서명 인증서 허용&quot;은 사내 서버가 정식 SSL 인증서 없이 운영될 때만 켜세요.
           </p>
         </details>
         {error === "send" && (
           <div className="mb-3 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
             {why === "auth" && "메일 서버가 로그인(SMTP 인증)을 거부했습니다. 아이디·비밀번호를 확인하세요."}
+            {why === "cert" && "서버의 SSL 인증서를 신뢰할 수 없습니다(자체서명 등) — 사내 서버에서 흔합니다. 위의 ⚙ 설정에서 \"자체서명 인증서 허용\"을 켜고 다시 보내세요."}
             {why === "timeout" && "보내기 서버가 응답하지 않습니다. 위의 ⚙ 보내기(SMTP) 설정에서 포트를 465 또는 587로 바꾸고, 그 포트가 방화벽에 열려 있는지 확인하세요."}
             {why === "refused" && "보내기 서버가 이 포트를 거부했습니다. 위의 ⚙ 보내기(SMTP) 설정에서 포트를 465 또는 587로 바꿔보세요."}
             {(why === "dns" || why === "other" || !why) && "메일 발송에 실패했습니다. 위의 ⚙ 보내기(SMTP) 설정을 확인해주세요."}
             {" "}(작성한 내용은 그대로 남아 있습니다)
+            {detail && (
+              <div className="mt-2 rounded bg-white/70 px-2 py-1 font-mono text-xs text-red-500">
+                서버 응답: {detail}
+              </div>
+            )}
           </div>
         )}
         {error === "compose_missing" && (

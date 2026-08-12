@@ -954,6 +954,8 @@ model MailConnection {
   /// SMTP submission for compose-in-app (Option B). null → derived from host.
   smtpHost   String?
   smtpPort   Int?
+  /// 사내 서버의 자체서명(SSL) 인증서 허용 — 사용자가 명시적으로 켠 경우만.
+  smtpAllowSelfSigned Boolean @default(false)
   encPass    String
   lastSyncAt DateTime?
   createdAt  DateTime  @default(now())

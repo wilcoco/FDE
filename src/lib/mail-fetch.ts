@@ -53,15 +53,29 @@ function client(conn: ImapConn): ImapFlow {
 }
 
 /** Why a connection attempt failed, in terms the user can act on. */
-export type ConnFailure = "auth" | "timeout" | "refused" | "dns" | "other";
+export type ConnFailure = "auth" | "timeout" | "refused" | "dns" | "cert" | "other";
+
+const CERT_CODES = new Set([
+  "DEPTH_ZERO_SELF_SIGNED_CERT", "SELF_SIGNED_CERT_IN_CHAIN",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "CERT_HAS_EXPIRED",
+  "ERR_TLS_CERT_ALTNAME_INVALID", "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+]);
 
 export function classifyConnError(e: unknown): ConnFailure {
   const err = e as { code?: string; authenticationFailed?: boolean; message?: string };
   if (err?.authenticationFailed || /AUTHENTICATIONFAILED|LOGIN failed|Invalid credentials/i.test(err?.message ?? "")) return "auth";
+  if (err?.code && CERT_CODES.has(err.code)) return "cert"; // 사내 서버 자체서명 인증서
   if (err?.code === "ENOTFOUND" || err?.code === "EAI_AGAIN") return "dns";
   if (err?.code === "ECONNREFUSED") return "refused";
   if (err?.code === "ETIMEDOUT" || err?.code === "CONNECT_TIMEOUT" || /timeout|required time/i.test(err?.message ?? "")) return "timeout";
   return "other";
+}
+
+/** Short, safe error line for showing the user WHAT actually failed. */
+export function connErrorDetail(e: unknown): string {
+  const err = e as { code?: string; message?: string };
+  const msg = String(err?.message ?? "").replace(/[\r\n]+/g, " ").slice(0, 120);
+  return [err?.code, msg].filter(Boolean).join(" — ");
 }
 
 function pop3ConnOf(conn: ImapConn) {

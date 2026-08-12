@@ -114,6 +114,39 @@ export async function run(t: (name: string, fn: () => void | Promise<void>) => v
     srv2.close();
   });
 
+  await t("no-AUTH server (POP-before-SMTP 방식): AUTH is skipped, send succeeds", async () => {
+    // Nmail-style: EHLO doesn't advertise AUTH; the client must not send it
+    const noauth: Captured = { rcpts: [], data: "", authUser: "" };
+    const srv3 = net.createServer((sock) => {
+      sock.on("error", () => {});
+      let inData = false, buf = "";
+      sock.write("220 nmail\r\n");
+      sock.on("data", (d) => {
+        const chunk = d.toString();
+        if (inData) {
+          buf += chunk;
+          if (buf.includes("\r\n.\r\n")) { noauth.data = buf.split("\r\n.\r\n")[0]; inData = false; sock.write("250 queued\r\n"); }
+          return;
+        }
+        for (const line of chunk.split("\r\n").filter(Boolean)) {
+          const up = line.toUpperCase();
+          if (up.startsWith("EHLO")) sock.write("250-nmail\r\n250 SIZE 52428800\r\n"); // no AUTH!
+          else if (up.startsWith("AUTH")) sock.write("500 command not recognized\r\n");
+          else if (up.startsWith("RCPT TO")) { noauth.rcpts.push(line); sock.write("250 ok\r\n"); }
+          else if (up === "DATA") { inData = true; buf = ""; sock.write("354 go\r\n"); }
+          else if (up === "QUIT") { sock.write("221\r\n"); sock.end(); }
+          else sock.write("250 ok\r\n");
+        }
+      });
+    });
+    await new Promise((r) => srv3.listen(12527, "127.0.0.1", () => r(null)));
+    await smtpSend({ host: "127.0.0.1", port: 12527, user: "json", pass: "pw" }, {
+      from: "json@icams.co.kr", to: ["v@x.com"], subject: "s", text: "t", messageId: "m2@x",
+    });
+    assert.equal(noauth.rcpts.length, 1);
+    srv3.close();
+  });
+
   await t("deriveSmtp: known providers mapped, company falls back to same host:587", () => {
     assert.deepEqual(deriveSmtp("imap.naver.com"), { host: "smtp.naver.com", port: 465 });
     assert.deepEqual(deriveSmtp("imap.gmail.com"), { host: "smtp.gmail.com", port: 465 });

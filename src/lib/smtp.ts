@@ -13,6 +13,8 @@ export interface SmtpConfig {
   port: number;
   user: string;
   pass: string;
+  /** 사내 서버 자체서명 인증서 허용 — 사용자가 명시적으로 켠 경우만 true. */
+  allowSelfSigned?: boolean;
 }
 
 export interface OutgoingMail {
@@ -61,11 +63,11 @@ interface Wire {
   destroy(): void;
 }
 
-async function openWire(host: string, port: number): Promise<Wire> {
+async function openWire(host: string, port: number, allowSelfSigned = false): Promise<Wire> {
   let socket: net.Socket = await new Promise((resolve, reject) => {
     const isTls = port === 465;
     const s: net.Socket = isTls
-      ? tls.connect({ host, port, servername: host })
+      ? tls.connect({ host, port, servername: host, rejectUnauthorized: !allowSelfSigned })
       : net.connect({ host, port });
     const timer = setTimeout(() => { s.destroy(); reject(connError("CONNECT_TIMEOUT", "Failed to establish connection in required time")); }, CONNECT_TIMEOUT);
     s.once(isTls ? "secureConnect" : "connect", () => { clearTimeout(timer); resolve(s); });
@@ -116,7 +118,7 @@ async function openWire(host: string, port: number): Promise<Wire> {
       socket.removeAllListeners("data");
       socket.removeAllListeners("error");
       const upgraded: tls.TLSSocket = await new Promise((resolve, reject) => {
-        const t = tls.connect({ socket, servername: host }, () => resolve(t));
+        const t = tls.connect({ socket, servername: host, rejectUnauthorized: !allowSelfSigned }, () => resolve(t));
         t.once("error", reject);
       });
       socket = upgraded;
@@ -128,7 +130,7 @@ async function openWire(host: string, port: number): Promise<Wire> {
 
 /** Send one mail. Throws with classifiable codes (CONNECT_TIMEOUT / auth / ERR_RESPONSE). */
 export async function smtpSend(cfg: SmtpConfig, mail: OutgoingMail): Promise<void> {
-  const wire = await openWire(cfg.host, cfg.port);
+  const wire = await openWire(cfg.host, cfg.port, cfg.allowSelfSigned);
   try {
     await wire.send(null, [220]); // greeting
     let ehlo = await wire.send(`EHLO flowdesk.local`, [250]);
@@ -137,10 +139,13 @@ export async function smtpSend(cfg: SmtpConfig, mail: OutgoingMail): Promise<voi
       await wire.upgrade();
       ehlo = await wire.send(`EHLO flowdesk.local`, [250]);
     }
-    // AUTH LOGIN is the widest-supported (Nmail, Naver, Gmail all take it)
-    await wire.send("AUTH LOGIN", [334]);
-    await wire.send(Buffer.from(cfg.user).toString("base64"), [334]);
-    await wire.send(Buffer.from(cfg.pass).toString("base64"), [235]);
+    // AUTH LOGIN only when the server offers it — old Korean servers (Nmail)
+    // may use POP-before-SMTP instead and reject the AUTH verb outright
+    if (/AUTH[ =][^\r\n]*LOGIN/i.test(ehlo)) {
+      await wire.send("AUTH LOGIN", [334]);
+      await wire.send(Buffer.from(cfg.user).toString("base64"), [334]);
+      await wire.send(Buffer.from(cfg.pass).toString("base64"), [235]);
+    }
 
     await wire.send(`MAIL FROM:<${mail.from}>`, [250]);
     for (const rcpt of [...mail.to, ...(mail.bcc ?? [])]) {

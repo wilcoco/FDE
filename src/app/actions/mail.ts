@@ -11,7 +11,8 @@ import { prisma } from "@/lib/db";
 import { requireContext } from "@/lib/session";
 import { encryptSecret } from "@/lib/crypto";
 import { loadMailConn } from "@/lib/mail-conn";
-import { testConnection, listRecentInbox, fetchBody, appendToSent, classifyConnError, protocolFor } from "@/lib/mail-fetch";
+import { testConnection, listRecentInbox, fetchBody, appendToSent, classifyConnError, connErrorDetail, protocolFor } from "@/lib/mail-fetch";
+import { pop3Test } from "@/lib/pop3";
 import { smtpSend, buildMessage, deriveSmtp } from "@/lib/smtp";
 import { detectEndpoints } from "@/lib/mail-autodetect";
 import { randomUUID } from "node:crypto";
@@ -79,9 +80,10 @@ export async function updateSmtpSettings(formData: FormData) {
   const smtpHost = String(formData.get("smtpHost") ?? "").trim() || null;
   const smtpPortRaw = Number(formData.get("smtpPort") ?? 0);
   const smtpPort = smtpPortRaw > 0 ? smtpPortRaw : null;
+  const smtpAllowSelfSigned = formData.get("allowSelfSigned") === "on";
   await prisma.mailConnection.updateMany({
     where: { userId: user.id },
-    data: { smtpHost, smtpPort },
+    data: { smtpHost, smtpPort, smtpAllowSelfSigned },
   });
   redirect("/mail?smtp=saved");
 }
@@ -214,8 +216,15 @@ export async function composeAndSend(formData: FormData) {
     port: conn.smtpPort ?? deriveSmtp(conn.host).port,
     user: conn.login?.trim() || conn.email,
     pass: conn.pass,
+    allowSelfSigned: conn.smtpAllowSelfSigned,
   };
   const domain = conn.email.split("@")[1] ?? "flowdesk.local";
+
+  // POP-before-SMTP: 옛 국산 서버(Nmail 등)는 POP3 로그인으로 발신 자격을
+  // 부여한다 — 보내기 직전에 한 번 로그인해 두면 어느 쪽이든 무해하다
+  if (isPop3) {
+    await pop3Test({ host: conn.host, port: conn.port, user: smtp.user, pass: conn.pass }).catch(() => {});
+  }
 
   // decompose ONCE — the same body applies to every recipient's loop
   let summary = subject;
@@ -283,7 +292,7 @@ export async function composeAndSend(formData: FormData) {
       // partial failure: report what went out and what didn't, keep the draft
       const remaining = batches.slice(i).flatMap((b) => b.rcpts).join(", ");
       const echo = new URLSearchParams({
-        error: "send", why, to: remaining, subject, body: text,
+        error: "send", why, detail: connErrorDetail(e), to: remaining, subject, body: text,
         ...(createdIds.length ? { sent: String(createdIds.length) } : {}),
       });
       redirect(`/mail?${echo.toString()}`);

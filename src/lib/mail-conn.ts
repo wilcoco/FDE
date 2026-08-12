@@ -8,7 +8,7 @@ import type { ImapConn } from "./mail-fetch";
 
 export async function loadMailConn(
   userId: string,
-): Promise<(ImapConn & { smtpHost: string | null; smtpPort: number | null; lastSyncAt: Date | null }) | null> {
+): Promise<(ImapConn & { smtpHost: string | null; smtpPort: number | null; smtpAllowSelfSigned: boolean; lastSyncAt: Date | null }) | null> {
   const row = await prisma.mailConnection.findUnique({ where: { userId } });
   if (!row) return null;
   return {
@@ -19,6 +19,7 @@ export async function loadMailConn(
     pass: decryptSecret(row.encPass),
     smtpHost: row.smtpHost,
     smtpPort: row.smtpPort,
+    smtpAllowSelfSigned: row.smtpAllowSelfSigned,
     lastSyncAt: row.lastSyncAt,
   };
 }
