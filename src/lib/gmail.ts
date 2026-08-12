@@ -4,6 +4,7 @@
 // Separate OAuth client from login (GOOGLE_MAIL_CLIENT_ID) so the login app
 // stays published/unlimited while Gmail runs as a 100-user testing beta.
 
+import { appUrl } from "./app-url";
 import type { MailEnvelope } from "./connector";
 import type { ListedMail } from "./mail-fetch";
 
@@ -20,7 +21,6 @@ export function gmailOAuthConfigured(): boolean {
 
 function clientId(): string { return process.env.GOOGLE_MAIL_CLIENT_ID ?? ""; }
 function clientSecret(): string { return process.env.GOOGLE_MAIL_CLIENT_SECRET ?? ""; }
-function appUrl(): string { return process.env.APP_URL?.replace(/\/$/, "") ?? "http://localhost:3000"; }
 
 export function gmailRedirectUri(): string {
   return `${appUrl()}/api/mail/google/callback`;

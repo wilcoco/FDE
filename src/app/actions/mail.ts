@@ -17,6 +17,7 @@ import { smtpSend, buildMessage, deriveSmtp } from "@/lib/smtp";
 import { askMailText, askMailHtml } from "@/lib/mail-template";
 import { refreshAccessToken, gmailSendRaw } from "@/lib/gmail";
 import { detectEndpoints } from "@/lib/mail-autodetect";
+import { appUrl } from "@/lib/app-url";
 import { randomUUID } from "node:crypto";
 import { counterpartyOf, extractThreadRefs, normalizeMessageId, stripQuotedTail, pickInstructionForReply, normalizeEmail } from "@/lib/inbound-email";
 import { generateMilestones } from "@/lib/ai";
@@ -280,7 +281,7 @@ export async function composeAndSend(formData: FormData) {
     ? to.map((r) => ({ rcpts: [r], counterparty: counterpartyOf([r], conn.email) || null }))
     : [{ rcpts: to, counterparty: counterpartyOf(to, conn.email) || null }];
 
-  const appUrl = (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
+  const publicUrl = appUrl();
   const createdIds: string[] = [];
   for (const [i, batch] of batches.entries()) {
     let messageId = `fd-${randomUUID()}@${domain}`;
@@ -291,7 +292,7 @@ export async function composeAndSend(formData: FormData) {
       senderEmail: conn.email,
       subject,
       body: text,
-      replyUrl: `${appUrl}/r/${replyToken}`,
+      replyUrl: `${publicUrl}/r/${replyToken}`,
     };
     const mail = {
       from: conn.email,

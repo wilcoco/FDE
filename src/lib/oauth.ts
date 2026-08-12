@@ -29,9 +29,8 @@ interface ProviderConfig {
   fetchProfile: (accessToken: string) => Promise<SocialProfile>;
 }
 
-function appUrl(): string {
-  return process.env.APP_URL?.replace(/\/$/, "") ?? "http://localhost:3000";
-}
+import { appUrl } from "./app-url";
+export { appUrl };
 
 export function redirectUri(provider: ProviderId): string {
   return `${appUrl()}/api/auth/${provider}/callback`;
