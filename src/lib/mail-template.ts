@@ -28,6 +28,9 @@ export function askMailText(m: AskMailInput): string {
     `▶ 아래 링크에서 바로 답변하실 수 있습니다 (가입 불필요):`,
     m.replyUrl,
     "",
+    `링크가 열리지 않는 환경(사내 보안망 등)이라면 이 메일에 그대로 회신해 주세요 —`,
+    `파일도 회신에 첨부하시면 됩니다.`,
+    "",
     `${m.senderName} <${m.senderEmail}> · Saydog로 요청됨`,
   ].join("\n");
 }
@@ -51,7 +54,7 @@ export function askMailHtml(m: AskMailInput): string {
       ✍️ 바로 답변하기
     </a>
     <p style="margin:12px 0 0;font-family:Apple SD Gothic Neo,Malgun Gothic,Segoe UI,sans-serif;font-size:12px;color:#9ca3af;">
-      가입·로그인 없이 답변할 수 있습니다. 메일로 회신하셔도 됩니다.
+      가입·로그인 없이 답변할 수 있습니다. 링크가 열리지 않는 환경이라면 이 메일에 회신(파일 첨부 포함)하셔도 됩니다.
     </p>
   </td></tr>
 </table>

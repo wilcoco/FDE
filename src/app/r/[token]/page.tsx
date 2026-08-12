@@ -100,6 +100,9 @@ export default async function ReplyPage({
         />
         <label className="block">
           <span className="text-xs font-medium text-gray-600">첨부파일 (선택 · 최대 3개, 각 5MB)</span>
+          <span className="mt-0.5 block text-[11px] text-gray-400">
+            사내 보안정책으로 업로드가 막혀 있다면, 답변만 여기서 보내고 파일은 원래 메일에 회신으로 첨부해주세요.
+          </span>
           <input
             type="file" name="files" multiple
             className="mt-1 block w-full text-xs text-gray-500 file:mr-3 file:rounded-md file:border-0 file:bg-indigo-50 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-indigo-600"
