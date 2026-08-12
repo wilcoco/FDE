@@ -33,5 +33,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
   const result = await processExternalReply(token, content, responder, files);
   if (result === "ok") return back("done=1");
   if (result === "invalid") return NextResponse.redirect(new URL("/r/invalid", appUrl()), 303);
+  if (result === "expired") return back(""); // GET renders the expired state itself
   return back(`error=${result}`);
 }

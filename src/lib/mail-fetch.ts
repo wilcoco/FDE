@@ -6,7 +6,7 @@ import { ImapFlow } from "imapflow";
 import { pickSentMailbox, type MailEnvelope } from "./connector";
 import { pop3Test, pop3ListRecent, pop3FetchRaw } from "./pop3";
 import { headersToEnvelope, extractTextBody } from "./mail-headers";
-import { refreshAccessToken, gmailListRecent } from "./gmail";
+import { refreshAccessToken } from "./gmail";
 
 export interface ImapConn {
   host: string;
@@ -147,7 +147,10 @@ async function pop3Recent(conn: ImapConn, n: number): Promise<ListedMail[]> {
  * page explains the habit.
  */
 export async function listRecentSent(conn: ImapConn, n = 20): Promise<ListedMail[]> {
-  if (isGmail(conn)) return gmailListRecent(await refreshAccessToken(conn.refresh!), "SENT", n);
+  // Gmail is send-only (gmail.send, sensitive scope): listing the mailbox
+  // would need a RESTRICTED scope (CASA audit). SAYs are born in the app and
+  // replies arrive via the 직답 button — there is nothing to list.
+  if (isGmail(conn)) return [];
   if (protocolFor(conn.port) === "pop3") return pop3Recent(conn, n);
   const c = client(conn);
   await c.connect();
@@ -163,7 +166,7 @@ export async function listRecentSent(conn: ImapConn, n = 20): Promise<ListedMail
 
 /** Recent inbox mail — used to detect replies to tracked threads. */
 export async function listRecentInbox(conn: ImapConn, n = 30): Promise<ListedMail[]> {
-  if (isGmail(conn)) return gmailListRecent(await refreshAccessToken(conn.refresh!), "INBOX", n);
+  if (isGmail(conn)) return []; // send-only scope — replies come via 직답, not inbox polling
   if (protocolFor(conn.port) === "pop3") return pop3Recent(conn, n);
   const c = client(conn);
   await c.connect();
@@ -196,8 +199,7 @@ export async function appendToSent(conn: ImapConn, rawMessage: string): Promise<
 
 /** Body of one specific mail — fetched ONLY on per-mail opt-in. */
 export async function fetchBody(conn: ImapConn, mailbox: string, seq: number, uid?: string): Promise<string> {
-  // gmail.metadata scope is structurally unable to fetch bodies — the privacy
-  // guarantee is enforced by Google, not by our restraint
+  // Gmail is send-only — we structurally cannot fetch anything from the mailbox
   if (isGmail(conn)) return "";
   if (protocolFor(conn.port) === "pop3") {
     if (!uid) return "";

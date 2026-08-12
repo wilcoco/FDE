@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { replyTokenExpired } from "@/lib/reply-token";
 
 export const dynamic = "force-dynamic";
 
@@ -19,11 +20,23 @@ export default async function ReplyPage({
   const inst = await prisma.instruction.findUnique({
     where: { replyToken: token },
     select: {
-      summary: true, rawText: true, createdAt: true, replyReceivedAt: true,
+      summary: true, rawText: true, createdAt: true, replyReceivedAt: true, status: true,
       author: { select: { name: true } },
       tenant: { select: { name: true } },
     },
   });
+
+  if (inst && replyTokenExpired(inst)) {
+    return (
+      <Shell>
+        <h1 className="text-lg font-bold">이 답변 링크는 만료되었습니다</h1>
+        <p className="mt-2 text-sm text-gray-500">
+          요청이 마감되었거나 링크의 유효기간(90일)이 지났습니다.
+          전할 내용이 있다면 {inst.author.name}님께 메일로 직접 회신해주세요.
+        </p>
+      </Shell>
+    );
+  }
 
   if (!inst) {
     return (

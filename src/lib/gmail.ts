@@ -1,17 +1,19 @@
 // Gmail API connector (OAuth) — the no-app-password path for Google mailboxes.
-// Privacy holds at the SCOPE level: gmail.metadata can read headers but is
-// cryptographically unable to fetch bodies; gmail.send only submits mail.
+// SEND-ONLY by design: gmail.send is a *sensitive* scope (verification only),
+// while every mailbox-reading scope — including gmail.metadata — is on
+// Google's *restricted* list and triggers the annual CASA security assessment.
+// We never read the mailbox at all: SAYs are born in the app (we mint the
+// Message-ID ourselves, Gmail preserves it) and replies arrive through the
+// 직답 button, so Saydog structurally cannot see a single byte of the
+// user's Gmail — a privacy guarantee enforced by Google, not by restraint.
 // Separate OAuth client from login (GOOGLE_MAIL_CLIENT_ID) so the login app
 // stays published/unlimited while Gmail runs as a 100-user testing beta.
 
 import { appUrl } from "./app-url";
-import type { MailEnvelope } from "./connector";
-import type { ListedMail } from "./mail-fetch";
 
 export const GMAIL_SCOPES = [
   "openid",
   "email",
-  "https://www.googleapis.com/auth/gmail.metadata",
   "https://www.googleapis.com/auth/gmail.send",
 ].join(" ");
 
@@ -92,69 +94,18 @@ export function emailFromIdToken(idToken: string): string | null {
 
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 
-async function api(accessToken: string, path: string, init?: RequestInit): Promise<Record<string, unknown>> {
-  const res = await fetch(`${API}${path}`, {
-    ...init,
-    headers: { Authorization: `Bearer ${accessToken}`, "content-type": "application/json", ...(init?.headers ?? {}) },
-  });
-  if (!res.ok) throw new Error(`gmail api ${path}: ${res.status} ${(await res.text()).slice(0, 200)}`);
-  return (await res.json()) as Record<string, unknown>;
-}
-
-interface GmailHeader { name: string; value: string }
-interface GmailMessageMeta {
-  id: string;
-  payload?: { headers?: GmailHeader[] };
-  internalDate?: string;
-}
-
-/** Convert Gmail metadata headers into our envelope shape. Pure. */
-export function gmailMetaToEnvelope(msg: GmailMessageMeta): MailEnvelope {
-  const h = new Map((msg.payload?.headers ?? []).map((x) => [x.name.toLowerCase(), x.value]));
-  const split = (v: string | undefined) => (v ? v.split(",").map((s) => s.trim()).filter(Boolean) : []);
-  return {
-    messageId: (h.get("message-id") ?? "").replace(/^<|>$/g, "").trim() || `gmail-${msg.id}`,
-    inReplyTo: h.get("in-reply-to") ?? null,
-    references: h.get("references") ?? null,
-    subject: h.get("subject") ?? null,
-    from: h.get("from") ?? null,
-    to: [...split(h.get("to")), ...split(h.get("cc"))],
-    date: msg.internalDate ? new Date(Number(msg.internalDate)).toISOString() : null,
-  };
-}
-
-/** Recent messages of a label (SENT / INBOX), headers only (metadata scope). */
-export async function gmailListRecent(accessToken: string, label: "SENT" | "INBOX", n = 20): Promise<ListedMail[]> {
-  const list = (await api(accessToken, `/messages?labelIds=${label}&maxResults=${n}`)) as {
-    messages?: { id: string }[];
-  };
-  // fetch all metadata in PARALLEL — 20 sequential round-trips was the /mail lag
-  const metas = await Promise.all(
-    (list.messages ?? []).map((m) =>
-      api(
-        accessToken,
-        `/messages/${m.id}?format=metadata&metadataHeaders=Message-ID&metadataHeaders=In-Reply-To&metadataHeaders=References&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc`,
-      ) as unknown as Promise<GmailMessageMeta>,
-    ),
-  );
-  return metas.map((meta, i) => ({ ...gmailMetaToEnvelope(meta), seq: i + 1, mailbox: label, uid: meta.id }));
-}
-
 /**
  * Send a raw RFC822 message via Gmail (lands in the user's real Sent folder
- * automatically). Returns the Message-ID Gmail actually stored — Gmail may
- * rewrite the header, and the reply thread will reference THEIRS, so we read
- * it back instead of trusting what we wrote.
+ * automatically). The Message-ID is OURS: buildMessage() already stamps the
+ * id we minted, and Gmail preserves a supplied RFC 5322 Message-ID — so
+ * threading works without ever reading anything back (which would need the
+ * restricted gmail.metadata scope).
  */
-export async function gmailSendRaw(accessToken: string, rawMessage: string): Promise<string> {
-  const sent = (await api(accessToken, "/messages/send", {
+export async function gmailSendRaw(accessToken: string, rawMessage: string): Promise<void> {
+  const res = await fetch(`${API}/messages/send`, {
     method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
     body: JSON.stringify({ raw: Buffer.from(rawMessage, "binary").toString("base64url") }),
-  })) as { id: string };
-  const meta = (await api(
-    accessToken,
-    `/messages/${sent.id}?format=metadata&metadataHeaders=Message-ID`,
-  )) as unknown as GmailMessageMeta;
-  const h = new Map((meta.payload?.headers ?? []).map((x) => [x.name.toLowerCase(), x.value]));
-  return (h.get("message-id") ?? "").replace(/^<|>$/g, "").trim() || `gmail-${sent.id}`;
+  });
+  if (!res.ok) throw new Error(`gmail send: ${res.status} ${(await res.text()).slice(0, 200)}`);
 }

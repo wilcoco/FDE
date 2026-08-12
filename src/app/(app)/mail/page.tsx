@@ -223,7 +223,9 @@ export default async function MailPage({
         <div>
           <h1 className="text-2xl font-bold">📧 메일 → 지시</h1>
           <p className="mt-1 text-sm text-gray-500">
-            {isPop3
+            {isGmailConn
+              ? `${conn.email} 명의로 발송합니다. 답변은 메일 속 직답 버튼으로 바로 도착합니다.`
+              : isPop3
               ? `${conn.email}의 받은편지함 (POP3). 맡긴 일을 지시로 등록하면 답장이 DO로 잡힙니다.`
               : `${conn.email}의 최근 보낸 메일. 맡긴 일을 지시로 등록하면 답장이 DO로 잡힙니다.`}
           </p>
@@ -239,6 +241,11 @@ export default async function MailPage({
           <Link href="/dashboard" className="underline">대시보드에서 확인 →</Link>
         </div>
       )}
+      {error === "gmailsync" && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          Gmail 연결은 발송 전용이라 받은편지함을 확인하지 않습니다 — 답변은 직답 버튼으로 자동 도착합니다.
+        </div>
+      )}
       {error === "noconn" && (
         <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">메일 연결이 없습니다.</div>
       )}
@@ -252,8 +259,9 @@ export default async function MailPage({
       {/* capability card — the honest contract for THIS server */}
       {isGmailConn ? (
         <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-          Google 연결(OAuth) — 보낸메일 자동 표시 · 답장 감지 · 앱에서 발송.
-          본문은 구글 권한 정책상 읽을 수 없습니다(제목·수신자만) — 프라이버시가 구글 차원에서 보장됩니다.
+          Google 연결(OAuth) — <b>발송 전용 권한(gmail.send)만</b> 사용합니다.
+          Saydog은 회원님의 메일함을 제목·헤더를 포함해 <b>한 글자도 읽을 수 없습니다</b> — 구글 권한 체계가 이를 보장합니다.
+          지시는 아래에서 작성할 때 추적되고, 답변은 메일 속 직답 버튼으로 도착합니다.
         </div>
       ) : isPop3 ? (
         <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-xs leading-5 text-sky-900">
@@ -363,6 +371,12 @@ export default async function MailPage({
         </form>
       </div>
 
+      {isGmailConn ? (
+        <div className="rounded-md border border-gray-200 bg-gray-50 p-3 text-xs text-gray-500">
+          Gmail은 발송 전용이라 메일함 목록·답장 확인 버튼이 없습니다 — 필요하지도 않습니다.
+          상대방이 직답 버튼으로 답하는 순간 대시보드에 ✉ 답장 도착이 표시되고, 회원님의 받은편지함에도 증빙 사본이 쌓입니다.
+        </div>
+      ) : (
       <div className="flex items-center justify-between">
         <span className="text-xs text-gray-400">
           이 화면을 열 때만 메일함을 읽습니다 · 기본은 메타데이터만 저장
@@ -378,6 +392,7 @@ export default async function MailPage({
           </form>
         </div>
       </div>
+      )}
 
       {fetchError && (
         <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
@@ -385,6 +400,7 @@ export default async function MailPage({
         </div>
       )}
 
+      {!isGmailConn && (
       <div className="card divide-y divide-gray-100 p-0">
         {!wantList && !fetchError && (
           <Link href="/mail?list=1" className="block p-4 text-sm text-gray-400 hover:bg-gray-50">
@@ -457,6 +473,7 @@ export default async function MailPage({
           );
         })}
       </div>
+      )}
     </div>
   );
 }

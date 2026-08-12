@@ -60,6 +60,9 @@ async function main() {
   console.log("── mail-autodetect ──");
   await (await import("./mail-autodetect.test")).run(t);
 
+  console.log("── reply-token ──");
+  await (await import("./reply-token.test")).run(t);
+
   console.log("── migrations (embedded Postgres) ──");
   await (await import("./migrations.test")).run(t);
 

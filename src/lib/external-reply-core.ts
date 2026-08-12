@@ -9,6 +9,7 @@ import { refreshAccessToken, gmailSendRaw } from "./gmail";
 import { protocolFor } from "./mail-fetch";
 import { pop3Test } from "./pop3";
 import { randomUUID } from "node:crypto";
+import { replyTokenExpired } from "./reply-token";
 import type { Prisma } from "@prisma/client";
 
 export const MAX_FILES = 3;
@@ -16,7 +17,7 @@ export const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
 export interface ReplyUpload { name: string; mime: string; buf: Buffer }
 
-export type ReplyResult = "ok" | "empty" | "file" | "invalid";
+export type ReplyResult = "ok" | "empty" | "file" | "invalid" | "expired";
 
 export async function processExternalReply(
   token: string,
@@ -29,9 +30,10 @@ export async function processExternalReply(
 
   const inst = await prisma.instruction.findUnique({
     where: { replyToken: token },
-    select: { id: true, tenantId: true, authorId: true, summary: true, counterparty: true, replyReceivedAt: true, threadMessageId: true },
+    select: { id: true, tenantId: true, authorId: true, summary: true, counterparty: true, replyReceivedAt: true, threadMessageId: true, status: true, createdAt: true },
   });
   if (!inst) return "invalid";
+  if (replyTokenExpired(inst)) return "expired"; // 유출된 링크가 영원히 살지 않게
 
   const body = content.trim().slice(0, 5000);
   const who = responder.trim().slice(0, 100) || inst.counterparty || "상대방";

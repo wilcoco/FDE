@@ -284,7 +284,7 @@ export async function composeAndSend(formData: FormData) {
   const publicUrl = appUrl();
   const createdIds: string[] = [];
   for (const [i, batch] of batches.entries()) {
-    let messageId = `fd-${randomUUID()}@${domain}`;
+    const messageId = `fd-${randomUUID()}@${domain}`;
     // 직답 버튼: unguessable token → account-free answer page → straight into DB
     const replyToken = randomUUID();
     const ask = {
@@ -305,10 +305,10 @@ export async function composeAndSend(formData: FormData) {
     };
     try {
       if (isGmailConn) {
-        // Gmail may rewrite the Message-ID — track what it actually stored,
-        // because the counterparty's reply will reference THAT id
+        // Gmail preserves the RFC 5322 Message-ID we minted — no read-back,
+        // which is what keeps the OAuth scope at send-only (no CASA audit)
         const accessToken = await refreshAccessToken(conn.refresh!);
-        messageId = await gmailSendRaw(accessToken, buildMessage(mail));
+        await gmailSendRaw(accessToken, buildMessage(mail));
       } else {
         await smtpSend(smtp, mail);
       }
@@ -340,6 +340,9 @@ export async function syncReplies() {
   const { tenant, user } = await requireContext();
   const conn = await loadMailConn(user.id);
   if (!conn) redirect("/mail?error=noconn");
+  // Gmail is send-only — the inbox cannot be polled, and doesn't need to be:
+  // replies land through the 직답 button directly.
+  if (conn.provider === "gmail" && conn.refresh) redirect("/mail?error=gmailsync");
 
   const inbox = await listRecentInbox(conn, 30).catch(() => []);
   const candidates = inbox.filter((m) => m.inReplyTo || m.references);

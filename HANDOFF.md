@@ -26,14 +26,17 @@
 ```
 
 - 상대방 관점: 버튼 하나, 로그인 없음, "별도의 메일 회신은 필요 없습니다".
-- 이 구조 덕에 Gmail 제한 스코프(readonly)·CASA 감사·수신 서버가 전부 불필요.
+- 이 구조 덕에 Gmail 읽기 스코프·CASA 감사·수신 서버가 전부 불필요.
 - **2026-08-12 창업자가 프로덕션에서 전체 루프 작동 확인** ("잘 돌아 가는데").
+- 토큰 수명: **90일 TTL + 지시 ARCHIVED 시 즉시 만료** (`src/lib/reply-token.ts`) — 유출 링크가 영원히 살지 않는다. 1회성은 의도적으로 안 함(견적 보완 등 정당한 재답변이 흔함).
+- ⚠ 냉정한 평가: 이 패턴 자체는 발명이 아니다 — Smartsheet Update Request가 "무계정 상대 폼 응답 → 행 반영"을 이미 한다. 기술 해자가 아니라 **수요 검증**으로 읽을 것. 해자는 §4-가 참조.
 
 ## 3. 메일 스택 (모두 자체 구현, 외부 의존성 0)
 
 | 계층 | 파일 | 내용 |
 |---|---|---|
-| Gmail OAuth | `src/lib/gmail.ts` | metadata+send 스코프(본문 구조적으로 못 읽음=프라이버시), 병렬 메타 fetch, 발송 후 Gmail이 실제 저장한 Message-ID 회수 |
+| Gmail OAuth | `src/lib/gmail.ts` | **send 단독 스코프** (openid/email/gmail.send) — 메일함을 한 글자도 못 읽음. Message-ID는 우리가 직접 생성(RFC 5322, Gmail이 보존) → read-back 불필요 |
+| 직답 토큰 수명 | `src/lib/reply-token.ts` | 순수 로직: 90일 TTL + ARCHIVED 즉시 만료. 코어와 /r 페이지가 공유 |
 | IMAP | `src/lib/connector.ts`, `mail-fetch.ts` | 993 implicit TLS / 143 STARTTLS |
 | POP3 | `src/lib/pop3.ts` | USER/PASS/UIDL/TOP/RETR, dot-stuffing — Nmail 등 국산 POP3-전용 서버 대응 |
 | SMTP | `src/lib/smtp.ts` | STARTTLS, AUTH LOGIN 아이디 형태 재시도(bare id ↔ full address), multipart/mixed 첨부, RFC2047 한글 헤더, In-Reply-To 스레딩, self-signed 인증서 opt-in, POP-before-SMTP |
@@ -47,10 +50,31 @@
 ## 4. 전략 결정 (확정된 것)
 
 1. **주 타깃: Gmail/글로벌.** 레거시 국산 사내메일(Nmail 등) 지원은 완성 상태로 동결 — 해자(moat)로 유지.
-2. **Gmail OAuth는 테스트 모드(100명)로 베타 운영.** 스코프가 metadata+send뿐이라 확장 시에도 CASA 부담 최소. readonly 스코프는 채택 안 함(직답 구조로 불필요).
+2. **Gmail 스코프는 send 단독.** ~~"metadata+send라 CASA 부담 최소"~~ ← **이전 판단은 오류였음**: `gmail.metadata`는 Google **restricted** 목록에 있어 연 단위 CASA 평가를 트리거한다. 2026-08-12 외부 리뷰가 잡아냄 → metadata 스코프 제거 완료. 이제 sensitive(`gmail.send`)만 남아 **검증만 통과하면 CASA 없음**. Message-ID는 자체 생성(Gmail이 보존), Gmail 연결은 메일함 목록·답장 폴링 없음(직답이 대체). 절대 읽기 스코프를 다시 넣지 말 것 — `tests/reply-token.test.ts`에 가드 테스트 있음.
 3. **로그인 OAuth와 메일 OAuth는 별도 클라이언트/프로젝트.** 로그인(openid/email/profile)은 심사 없이 프로덕션 게시 가능 → 무제한. 키: `GOOGLE_CLIENT_ID/SECRET`(로그인) vs `GOOGLE_MAIL_CLIENT_ID/SECRET`(메일).
 4. 주소록은 **자체 거래처 원장**(과거 수신자 기록)으로 — People API 안 씀.
 5. Gmail Add-on 판매는 성장 단계 과제 (ROADMAP 2.9, Marketplace는 결제 대행 안 함).
+
+## 4-가. 경쟁 지형과 해자 (2026-08-12 외부 리뷰 반영)
+
+**선례 지도** — 카테고리는 비어 있지 않다:
+- Smartsheet **Update Request**: 무계정 상대에게 폼 링크 → 응답이 행에 반영. 우리 직답 패턴의 직접 선례 (수요 증명 + 기술 해자 아님의 증거).
+- 요청 폼 계열(Wrike/Asana/Airtable 폼, Jotform Approvals): 외부인 무계정 입력 → 내부 레코드.
+- 클래식 **Outlook Assign Task**: 수락/거절·진척 동기화 — 사실상 직계 조상. MS가 버린 것은 기회이자 경고.
+- 국내 그룹웨어(하이웍스·다우오피스·네이버웍스·더존): 전자결재 중심, 저가 — **정면 충돌 금지**.
+- 빈 것은 시장이 아니라 **프레이밍**: "1인칭 지시-이행 추적"으로 포지셔닝한 곳이 없다. (폼=수집, 결재=사전승인 / 우리=사후 이행 확인.)
+
+**해자 서열 (사업 가치 순)**:
+1. **증빙(evidence) 포지셔닝** — 지시 원문+응답+첨부+타임스탬프가 발신자 메일함 스레드에 남는다. 안전지시 이행, 하도급 시정조치, 감사 대응. 한국 SMB에서 "관리 편의"보다 강한 구매 동기 → **제품의 1번 주장으로 올릴 것**.
+2. **1인칭 과금 구조** — 지시자만 결제, 수신자 N명 무료. 그룹웨어 1만원×150석 대신 관리자 10명×3만원: 총액은 작아도 도입 마찰 최소, seat 경제학 유리.
+3. 레거시 국산 메일 대응 — 진짜 해자지만 지키는 시장의 상한이 낮다(줄어드는 시장).
+직답 버튼 자체는 해자가 아님 — 유능한 팀이면 이틀에 복제.
+
+**리스크 대장**:
+- 피싱 오탐: 무계정 토큰 링크+파일 업로드 요구 = 사내 메일 게이트웨이가 싫어하는 형태(링크 리라이팅·격리). 대기업 협력사일수록 심함. 미해결.
+- 토큰=증빙의 약점: 90일 TTL+ARCHIVED 만료로 1차 방어(구현됨). 수신자 이메일 확인은 미구현 — 증빙 포지셔닝 강화 시 필요.
+- Resend(플랫폼 발송) 전환은 **도달률 후퇴** — 현재 사용자 본인 메일함 발송이 도달률 최적. 제로-설정 온보딩과 맞바꿀 가치 신중히.
+- **최대 리스크는 입력 지점**: 실제 지시는 카톡·전화·회의에서 나간다. 사장이 앱을 열어 지시를 "작성"하는 습관이 유일한 병목. 회의록·음성·카톡에서 SAY 후보 자동 추출이 장기적으로 진짜 제품이고, 직답 버튼은 그 뒤의 배관.
 
 ## 5. 프로덕션 환경
 
@@ -71,16 +95,19 @@
 ## 6. 테스트
 
 ```bash
-npx tsx tests/run.ts   # 169개 전부 통과 (2026-08-12 기준)
+npx tsx tests/run.ts   # 174개 전부 통과 (2026-08-12 기준)
 ```
-스위트: inbound-email, connector, crypto, mail-headers, pop3, mail-capabilities, smtp, mail-autodetect, migrations. 네트워크 없이 순수 로직만 검증.
+스위트: inbound-email, connector, crypto, mail-headers, pop3, mail-capabilities, smtp, mail-autodetect, reply-token(스코프 가드 포함), migrations. 네트워크 없이 순수 로직만 검증.
 
-## 7. 남은 일 (우선순위 순)
+## 7. 남은 일 (우선순위 순 — 2026-08-12 리뷰로 재서열)
 
-1. **구글 로그인 활성화 — 창업자 액션만 남음.** 코드는 완성(`SocialButtons` + `configuredProviders()` + 콜백). 필요한 것: 별도 **게시된** GCP 프로젝트에 웹 클라이언트 생성, 리디렉션 URI `https://fde-production-dc2f.up.railway.app/api/auth/google/callback`, Railway에 `GOOGLE_CLIENT_ID/SECRET` 추가.
-2. **온보딩 재설계 — 대기실 패턴(Option B) 합의됨.** 구글 로그인 → 선택 화면(새 회사 만들기 / 초대 코드 / 도메인 자동합류). 신규 소셜 유저는 현재 `/complete`(CompleteForm)로 가는데 이미 절반쯤 구현된 상태 — 여기서 확장할 것. 스키마 변경 없음, User 레코드는 선택 후 생성.
-3. **Saydog 리네이밍 코드 전체 적용** (현재 UI 곳곳에 FlowDesk 잔존, 예: `/complete` 로고).
-4. 도메인 구매(saydog.app), 추후 플랫폼 발송(Resend)으로 제로-설정 온보딩, Gmail Add-on(성장 단계).
+1. ~~gmail.metadata 제거 (자체 Message-ID 생성)~~ — **완료** (send 단독 스코프, 가드 테스트 포함). 창업자가 `/mail`에서 Google 재연결 한 번 하면 새 동의 화면(발송 권한만)으로 갱신됨 — 기존 토큰도 동작은 하므로 급하지 않음.
+2. **CAMS 도그푸딩이 다음 관문.** 관리자 10~15명, 2주. 지표 딱 둘: **응답률**(상대가 직답 버튼을 실제로 누르는가), **2주차 지시자 잔존율**(사장이 계속 앱을 여는가). 잔존율이 무너지면 나머지는 볼 필요 없음. 제품은 성립했고 미검증은 "돈을 내는가"다.
+3. **구글 로그인 활성화 — 창업자 액션만 남음.** 코드는 완성(`SocialButtons` + `configuredProviders()` + 콜백). 필요한 것: 별도 **게시된** GCP 프로젝트에 웹 클라이언트 생성, 리디렉션 URI `https://fde-production-dc2f.up.railway.app/api/auth/google/callback`, Railway에 `GOOGLE_CLIENT_ID/SECRET` 추가. (도그푸딩이 사내에서 도는 동안 편의 항목 — 잔존율보다 후순위.)
+4. **온보딩 재설계 — 대기실 패턴(Option B) 합의됨.** 구글 로그인 → 선택 화면(새 회사 만들기 / 초대 코드 / 도메인 자동합류). 신규 소셜 유저는 현재 `/complete`(CompleteForm)로 가는데 이미 절반쯤 구현된 상태 — 여기서 확장할 것. 스키마 변경 없음, User 레코드는 선택 후 생성.
+5. **Saydog 리네이밍 코드 전체 적용** (현재 UI 곳곳에 FlowDesk 잔존, 예: `/complete` 로고).
+6. 도메인 구매(saydog.app), Gmail Add-on(성장 단계). 플랫폼 발송(Resend)은 도달률 후퇴 리스크(§4-가)와 함께 재검토.
+7. (장기, §4-가) 직답 수신자 이메일 확인 · 카톡/회의록에서 SAY 자동 추출.
 
 ## 8. 창업자와의 협업 규칙 (standing instructions)
 
