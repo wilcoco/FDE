@@ -44,14 +44,14 @@ export const MAIL_PRESETS: MailPreset[] = [
     label: "네이버",
     host: "imap.naver.com",
     port: 993,
-    note: "네이버 메일 → 환경설정 → POP3/IMAP 설정에서 IMAP 사용 켜기 + 2단계 인증 후 앱 비밀번호 발급.",
+    note: "① 네이버 메일 → ⚙환경설정 → POP3/IMAP 설정 → IMAP 사용 ② mail.naver.com 우측 상단 프로필 → 보안설정 → 2단계 인증 켜기 ③ 같은 화면의 '애플리케이션 비밀번호'에서 발급 → 그 비밀번호를 아래에 입력.",
   },
   {
     key: "gmail",
     label: "Gmail",
     host: "imap.gmail.com",
     port: 993,
-    note: "Google 계정 2단계 인증을 켠 뒤 앱 비밀번호를 발급해 입력하세요.",
+    note: "① myaccount.google.com → 보안 → 2단계 인증 켜기(휴대폰) ② myaccount.google.com/apppasswords 에서 앱 이름 'Saydog'로 발급 ③ 16자리 코드를 아래 비밀번호 칸에 (공백 없이). 원래 구글 비밀번호는 저희에게 오지 않으며, 이 열쇠는 구글 설정에서 언제든 단독 폐기 가능합니다.",
   },
   {
     key: "daum",
