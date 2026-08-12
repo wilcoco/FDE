@@ -11,6 +11,7 @@ import { normalizeMessageId } from "@/lib/inbound-email";
 import { capabilitiesFor, MAIL_PRESETS } from "@/lib/mail-capabilities";
 import { gmailOAuthConfigured } from "@/lib/gmail";
 import PendingButton from "@/components/PendingButton";
+import RecipientInput from "@/components/RecipientInput";
 
 // what to tell the user for each connection-failure cause — actionable, not generic
 const CONNECT_HINTS: Record<string, string> = {
@@ -195,6 +196,17 @@ export default async function MailPage({
       })
     : [];
   // a multi-recipient mail owns SEVERAL loops (one per counterparty)
+  // 자체 주소록: 과거에 맡겼던 상대방 (최근 순, 중복 제거) — People API 불필요
+  const pastLoops = await prisma.instruction.findMany({
+    where: { tenantId: tenant.id, authorId: user.id, counterparty: { not: null } },
+    select: { counterparty: true },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+  const recentCounterparties = [...new Set(
+    pastLoops.flatMap((r) => (r.counterparty ?? "").split(",").map((e) => e.trim()).filter(Boolean)),
+  )].slice(0, 8);
+
   const byMsgId = new Map<string, typeof existing>();
   for (const r of existing) {
     const k = r.threadMessageId!;
@@ -319,10 +331,7 @@ export default async function MailPage({
           </div>
         )}
         <form action={composeAndSend} className="space-y-3">
-          <input
-            name="to" placeholder="받는 사람 (쉼표로 여러 명)" defaultValue={prevTo ?? ""}
-            className="input w-full" required
-          />
+          <RecipientInput recent={recentCounterparties} defaultValue={prevTo ?? ""} />
           <input
             name="subject" placeholder="제목 — 맡기는 일이 한 줄로 드러나게" defaultValue={prevSubject ?? ""}
             className="input w-full" required
