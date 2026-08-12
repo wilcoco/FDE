@@ -271,6 +271,12 @@ export async function completeFromReply(formData: FormData) {
   const outcome = String(formData.get("outcome") ?? "").trim();
 
   await prisma.$transaction(async (tx) => {
+    // 답이 전화·카톡·대면으로 왔어도 "답을 받았다"는 사실은 참이다 — 수동
+    // 마감이 답장 대기 배지를 함께 꺼야 장부가 진실해진다.
+    await tx.instruction.updateMany({
+      where: { id: instructionId, replyReceivedAt: null, counterparty: { not: null } },
+      data: { replyReceivedAt: new Date() },
+    });
     await tx.milestone.update({
       where: { id: m.id },
       data: { status: "DONE", doneAt: new Date(), returnNote: null },
