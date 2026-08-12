@@ -1,0 +1,108 @@
+import { prisma } from "@/lib/db";
+import { submitExternalReply } from "@/app/actions/external-reply";
+import PendingButton from "@/components/PendingButton";
+
+export const dynamic = "force-dynamic";
+
+/**
+ * 직답 페이지 — 계정 없는 상대방이 메일의 [바로 답변하기] 버튼으로 도착해
+ * 답변을 남기는 공개 화면. 토큰 소지가 곧 인증. 로그인 없음, 가입 없음.
+ */
+export default async function ReplyPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ token: string }>;
+  searchParams: Promise<{ done?: string; error?: string }>;
+}) {
+  const { token } = await params;
+  const { done, error } = await searchParams;
+
+  const inst = await prisma.instruction.findUnique({
+    where: { replyToken: token },
+    select: {
+      summary: true, rawText: true, createdAt: true, replyReceivedAt: true,
+      author: { select: { name: true } },
+      tenant: { select: { name: true } },
+    },
+  });
+
+  if (!inst) {
+    return (
+      <Shell>
+        <h1 className="text-lg font-bold">유효하지 않은 링크입니다</h1>
+        <p className="mt-2 text-sm text-gray-500">
+          링크가 만료되었거나 잘못 복사되었을 수 있습니다. 요청을 보낸 분에게 다시 확인해주세요.
+        </p>
+      </Shell>
+    );
+  }
+
+  if (done) {
+    return (
+      <Shell>
+        <div className="text-3xl">✅</div>
+        <h1 className="mt-2 text-lg font-bold">답변이 전달되었습니다</h1>
+        <p className="mt-2 text-sm text-gray-500">
+          {inst.author.name}님께 바로 전달됐습니다. 이 창은 닫으셔도 됩니다.
+          추가로 전할 내용이 생기면 같은 링크에서 다시 답변할 수 있습니다.
+        </p>
+      </Shell>
+    );
+  }
+
+  return (
+    <Shell>
+      <p className="text-xs text-gray-400">
+        {inst.tenant.name} · {inst.author.name}님의 요청 · {inst.createdAt.toISOString().slice(0, 10)}
+      </p>
+      <h1 className="mt-1 text-lg font-bold">{inst.summary ?? "요청"}</h1>
+      {inst.rawText && inst.rawText !== inst.summary && (
+        <p className="mt-3 whitespace-pre-wrap rounded-md bg-gray-50 p-3 text-sm leading-6 text-gray-700">
+          {inst.rawText.slice(0, 2000)}
+        </p>
+      )}
+
+      {error === "empty" && (
+        <div className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          답변 내용을 입력해주세요.
+        </div>
+      )}
+
+      <form action={submitExternalReply} className="mt-5 space-y-3">
+        <input type="hidden" name="token" value={token} />
+        <input
+          name="responder"
+          placeholder="성함 (선택)"
+          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+        />
+        <textarea
+          name="content"
+          rows={6}
+          required
+          placeholder="답변을 입력하세요 — 보내는 즉시 상대방의 확인함에 기록됩니다."
+          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm leading-6 focus:border-indigo-500 focus:outline-none"
+        />
+        <PendingButton pendingLabel="전달 중…" className="w-full rounded-md bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">
+          답변 보내기
+        </PendingButton>
+      </form>
+      <p className="mt-3 text-center text-xs text-gray-400">
+        가입·로그인 없이 전달됩니다 · 메일로 회신하셔도 됩니다
+      </p>
+    </Shell>
+  );
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex min-h-screen items-start justify-center bg-gray-50 px-4 py-16">
+      <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
+        {children}
+        <p className="mt-8 border-t border-gray-100 pt-4 text-center text-[11px] text-gray-300">
+          Saydog — 맡긴 일이 흐르는지 지켜봅니다
+        </p>
+      </div>
+    </div>
+  );
+}

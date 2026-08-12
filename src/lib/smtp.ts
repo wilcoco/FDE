@@ -29,6 +29,10 @@ export interface OutgoingMail {
   bcc?: string[]; // delivered but not shown in headers
   subject: string;
   text: string;
+  /** optional HTML alternative (직답 버튼 etc.) → multipart/alternative */
+  html?: string;
+  /** bare parent Message-ID → In-Reply-To/References (스레드에 끼워넣기) */
+  inReplyTo?: string;
   messageId: string; // bare form, no angle brackets
 }
 
@@ -46,20 +50,44 @@ export function encodeHeaderWord(value: string): string {
   return `=?UTF-8?B?${Buffer.from(value, "utf8").toString("base64")}?=`;
 }
 
-/** Build the RFC822 message. Body goes base64 so 한글/줄바꿈 survive any relay. */
+/** Build the RFC822 message. Bodies go base64 so 한글/줄바꿈 survive any relay.
+ * With `html` set, builds multipart/alternative (plain fallback + HTML 버튼). */
 export function buildMessage(m: OutgoingMail, now = new Date()): string {
-  const b64body = Buffer.from(m.text, "utf8").toString("base64").replace(/(.{76})/g, "$1\r\n");
-  return [
+  const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64").replace(/(.{76})/g, "$1\r\n");
+  const head = [
     `From: <${m.from}>`,
     `To: ${m.to.map((a) => `<${a}>`).join(", ")}`,
     `Subject: ${encodeHeaderWord(m.subject)}`,
     `Message-ID: <${m.messageId}>`,
+    ...(m.inReplyTo ? [`In-Reply-To: <${m.inReplyTo}>`, `References: <${m.inReplyTo}>`] : []),
     `Date: ${now.toUTCString().replace("GMT", "+0000")}`,
     "MIME-Version: 1.0",
-    'Content-Type: text/plain; charset=utf-8',
+  ];
+  if (!m.html) {
+    return [
+      ...head,
+      "Content-Type: text/plain; charset=utf-8",
+      "Content-Transfer-Encoding: base64",
+      "",
+      b64(m.text),
+    ].join("\r\n");
+  }
+  const boundary = `bnd-${m.messageId.replace(/[^a-zA-Z0-9]/g, "").slice(0, 24)}`;
+  return [
+    ...head,
+    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=utf-8",
     "Content-Transfer-Encoding: base64",
     "",
-    b64body,
+    b64(m.text),
+    `--${boundary}`,
+    "Content-Type: text/html; charset=utf-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    b64(m.html),
+    `--${boundary}--`,
   ].join("\r\n");
 }
 

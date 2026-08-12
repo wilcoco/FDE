@@ -803,6 +803,9 @@ model Instruction {
   counterparty      String?
   /// email intake: when a reply first arrived (open loop closed). null = 답장 대기.
   replyReceivedAt   DateTime?
+  /// 직답 버튼: unguessable token for the account-free web answer page (/r/{token}).
+  /// The counterparty clicks the button in the mail and answers straight into our DB.
+  replyToken        String?   @unique
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
 

@@ -14,6 +14,7 @@ import { loadMailConn } from "@/lib/mail-conn";
 import { testConnection, listRecentInbox, fetchBody, appendToSent, classifyConnError, connErrorDetail, protocolFor } from "@/lib/mail-fetch";
 import { pop3Test } from "@/lib/pop3";
 import { smtpSend, buildMessage, deriveSmtp } from "@/lib/smtp";
+import { askMailText, askMailHtml } from "@/lib/mail-template";
 import { refreshAccessToken, gmailSendRaw } from "@/lib/gmail";
 import { detectEndpoints } from "@/lib/mail-autodetect";
 import { randomUUID } from "node:crypto";
@@ -241,7 +242,7 @@ export async function composeAndSend(formData: FormData) {
     milestones = [{ title: subject, expectedResult: null }];
   }
 
-  const createInstruction = (messageId: string, counterparty: string | null) =>
+  const createInstruction = (messageId: string, counterparty: string | null, replyToken: string) =>
     prisma.$transaction(async (tx) => {
       const created = await tx.instruction.create({
         data: {
@@ -252,6 +253,7 @@ export async function composeAndSend(formData: FormData) {
           source: "EMAIL",
           threadMessageId: messageId,
           counterparty,
+          replyToken,
         },
       });
       await tx.milestone.createMany({
@@ -278,15 +280,26 @@ export async function composeAndSend(formData: FormData) {
     ? to.map((r) => ({ rcpts: [r], counterparty: counterpartyOf([r], conn.email) || null }))
     : [{ rcpts: to, counterparty: counterpartyOf(to, conn.email) || null }];
 
+  const appUrl = (process.env.APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
   const createdIds: string[] = [];
   for (const [i, batch] of batches.entries()) {
     let messageId = `fd-${randomUUID()}@${domain}`;
+    // 직답 버튼: unguessable token → account-free answer page → straight into DB
+    const replyToken = randomUUID();
+    const ask = {
+      senderName: user.name,
+      senderEmail: conn.email,
+      subject,
+      body: text,
+      replyUrl: `${appUrl}/r/${replyToken}`,
+    };
     const mail = {
       from: conn.email,
       to: batch.rcpts,
       bcc: isPop3 ? [conn.email] : [], // POP3: keep a copy where we can see it
       subject,
-      text,
+      text: askMailText(ask),
+      html: askMailHtml(ask),
       messageId,
     };
     try {
@@ -309,7 +322,7 @@ export async function composeAndSend(formData: FormData) {
       redirect(`/mail?${echo.toString()}`);
     }
     if (!isPop3 && !isGmailConn) void appendToSent(conn, buildMessage(mail)).catch(() => {});
-    const inst = await createInstruction(messageId, batch.counterparty);
+    const inst = await createInstruction(messageId, batch.counterparty, replyToken);
     createdIds.push(inst.id);
   }
 
