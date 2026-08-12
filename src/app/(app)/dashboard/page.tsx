@@ -138,15 +138,21 @@ export default async function Dashboard({
 
           <div className="space-y-2">
             {loops.replied.map((l) => (
-              <div key={l.id} className="flex items-center justify-between rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2">
-                <Link href={`/instructions/${l.id}`} className="min-w-0 flex-1">
+              <div key={l.id} className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2">
+                <Link href={`/instructions/${l.id}`} className="block min-w-0">
                   <span className="badge mr-2 bg-emerald-100 text-emerald-700">✉ 답장 도착</span>
                   <span className="text-sm font-medium">{l.summary}</span>
                   <span className="ml-2 text-xs text-gray-400">→ {l.counterparty}</span>
                 </Link>
-                <form action={completeFromReply} className="shrink-0">
+                {/* the ledger closes with BOTH sides: what was asked + what came back */}
+                <form action={completeFromReply} className="mt-2 flex gap-2">
                   <input type="hidden" name="instructionId" value={l.id} />
-                  <button className="btn px-3 py-1 text-xs">✅ 완료</button>
+                  <input
+                    name="outcome"
+                    placeholder="어떻게 됐나요? 한 줄 기록 (선택) — 예: 견적 3건 수령, 단가 15% 인하"
+                    className="input flex-1 px-2 py-1 text-xs"
+                  />
+                  <button className="btn shrink-0 px-3 py-1 text-xs">✅ 완료</button>
                 </form>
               </div>
             ))}

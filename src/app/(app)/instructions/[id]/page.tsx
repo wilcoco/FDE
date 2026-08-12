@@ -119,9 +119,14 @@ export default async function InstructionDetail({ params }: { params: Promise<{ 
                 <span className="badge bg-amber-100 text-amber-700">답장 대기</span>
               )}
               {canConfirm && inst.milestones.some((m) => m.status === "ACTIVE" || m.status === "BLOCKED") && (
-                <form action={completeFromReply}>
+                <form action={completeFromReply} className="flex flex-1 gap-2">
                   <input type="hidden" name="instructionId" value={inst.id} />
-                  <button className="btn px-3 py-1 text-xs">✅ 이 답장으로 완료</button>
+                  <input
+                    name="outcome"
+                    placeholder="결과 한 줄 기록 (선택)"
+                    className="input flex-1 px-2 py-1 text-xs"
+                  />
+                  <button className="btn shrink-0 px-3 py-1 text-xs">✅ 이 답장으로 완료</button>
                 </form>
               )}
             </div>

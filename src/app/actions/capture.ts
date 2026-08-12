@@ -266,11 +266,27 @@ export async function completeFromReply(formData: FormData) {
   });
   if (!m) return; // nothing open to close
 
+  // the ledger's closing entry: WHAT actually came back, in the asker's words.
+  // The say-do record holds both sides — the ask (rawText) and the outcome.
+  const outcome = String(formData.get("outcome") ?? "").trim();
+
   await prisma.$transaction(async (tx) => {
     await tx.milestone.update({
       where: { id: m.id },
       data: { status: "DONE", doneAt: new Date(), returnNote: null },
     });
+    if (outcome) {
+      await tx.milestoneComment.create({
+        data: {
+          tenantId: tenant.id,
+          instructionId,
+          milestoneId: m.id,
+          authorId: user.id,
+          body: `✅ 완료 기록: ${outcome.slice(0, 2000)}`,
+          mentions: [] as Prisma.InputJsonValue,
+        },
+      });
+    }
     await activateNext(tx, tenant.id, m);
     await tx.auditLog.create({
       data: { tenantId: tenant.id, actorId: user.id, action: "MILESTONE_DONE_FROM_REPLY", target: m.id },
