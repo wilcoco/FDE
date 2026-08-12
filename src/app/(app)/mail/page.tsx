@@ -33,14 +33,14 @@ export default async function MailPage({
   searchParams,
 }: {
   searchParams: Promise<{
-    error?: string; synced?: string; why?: string; preset?: string; smtp?: string; detail?: string; connected?: string;
+    error?: string; synced?: string; why?: string; preset?: string; smtp?: string; detail?: string; connected?: string; list?: string;
     host?: string; port?: string; email?: string; login?: string; // echoed back on failure
     to?: string; subject?: string; body?: string; // compose echo on send failure
   }>;
 }) {
   const { tenant, user } = await requireContext();
   const {
-    error, synced, why, preset, smtp: smtpSaved, detail, connected,
+    error, synced, why, preset, smtp: smtpSaved, detail, connected, list: listParam,
     host: prevHost, port: prevPort, email: prevEmail, login: prevLogin,
     to: prevTo, subject: prevSubject, body: prevBody,
   } = await searchParams;
@@ -175,16 +175,20 @@ export default async function MailPage({
     );
   }
 
-  // ── connected: fetch mail NOW (because the user opened this screen) ──
+  // ── connected. The screen renders INSTANTLY — the mailbox is only read
+  // when the user asks (?list=1): "메일 조회는 화면 열고 선택하게" ──
   const isGmailConn = conn.provider === "gmail" && !!conn.refresh;
   const caps = capabilitiesFor(conn.port);
   const isPop3 = !isGmailConn && caps.protocol === "pop3";
+  const wantList = listParam === "1";
   let mails: ListedMail[] = [];
   let fetchError: string | null = null;
-  try {
-    mails = await listRecentSent(conn, 20);
-  } catch (e) {
-    fetchError = e instanceof Error ? e.message : "메일함을 읽지 못했습니다";
+  if (wantList) {
+    try {
+      mails = await listRecentSent(conn, 20);
+    } catch (e) {
+      fetchError = e instanceof Error ? e.message : "메일함을 읽지 못했습니다";
+    }
   }
 
   // mark rows already registered
@@ -364,8 +368,8 @@ export default async function MailPage({
           이 화면을 열 때만 메일함을 읽습니다 · 기본은 메타데이터만 저장
         </span>
         <div className="flex items-center gap-2">
-          <Link href="/mail" className="rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50">
-            🔃 목록 새로고침
+          <Link href="/mail?list=1" className="rounded-md border border-gray-200 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50">
+            {wantList ? "🔃 목록 새로고침" : "📥 메일 불러오기"}
           </Link>
           <form action={syncReplies}>
             <PendingButton pendingLabel="받은편지함 확인 중…" className="btn px-3 py-1.5 text-sm">
@@ -382,7 +386,13 @@ export default async function MailPage({
       )}
 
       <div className="card divide-y divide-gray-100 p-0">
-        {mails.length === 0 && !fetchError && (
+        {!wantList && !fetchError && (
+          <Link href="/mail?list=1" className="block p-4 text-sm text-gray-400 hover:bg-gray-50">
+            📥 <span className="text-indigo-600 underline">메일 불러오기</span>를 누르면 {isPop3 ? "받은편지함" : "보낸 메일"}을
+            읽어옵니다 (누를 때만 메일함에 접속 · 제목/상대/날짜만).
+          </Link>
+        )}
+        {wantList && mails.length === 0 && !fetchError && (
           <div className="p-4 text-sm text-gray-400">최근 보낸 메일이 없습니다.</div>
         )}
         {mails.map((m) => {

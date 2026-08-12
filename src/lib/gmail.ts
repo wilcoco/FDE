@@ -128,15 +128,16 @@ export async function gmailListRecent(accessToken: string, label: "SENT" | "INBO
   const list = (await api(accessToken, `/messages?labelIds=${label}&maxResults=${n}`)) as {
     messages?: { id: string }[];
   };
-  const out: ListedMail[] = [];
-  for (const [i, m] of (list.messages ?? []).entries()) {
-    const meta = (await api(
-      accessToken,
-      `/messages/${m.id}?format=metadata&metadataHeaders=Message-ID&metadataHeaders=In-Reply-To&metadataHeaders=References&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc`,
-    )) as unknown as GmailMessageMeta;
-    out.push({ ...gmailMetaToEnvelope(meta), seq: i + 1, mailbox: label, uid: meta.id });
-  }
-  return out;
+  // fetch all metadata in PARALLEL — 20 sequential round-trips was the /mail lag
+  const metas = await Promise.all(
+    (list.messages ?? []).map((m) =>
+      api(
+        accessToken,
+        `/messages/${m.id}?format=metadata&metadataHeaders=Message-ID&metadataHeaders=In-Reply-To&metadataHeaders=References&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc`,
+      ) as unknown as Promise<GmailMessageMeta>,
+    ),
+  );
+  return metas.map((meta, i) => ({ ...gmailMetaToEnvelope(meta), seq: i + 1, mailbox: label, uid: meta.id }));
 }
 
 /**
