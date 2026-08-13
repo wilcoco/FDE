@@ -12,6 +12,7 @@ import { capabilitiesFor, MAIL_PRESETS } from "@/lib/mail-capabilities";
 import { gmailOAuthConfigured } from "@/lib/gmail";
 import PendingButton from "@/components/PendingButton";
 import RecipientInput from "@/components/RecipientInput";
+import LocalGmail from "@/components/LocalGmail";
 
 // what to tell the user for each connection-failure cause — actionable, not generic
 const CONNECT_HINTS: Record<string, string> = {
@@ -217,6 +218,19 @@ export default async function MailPage({
     byMsgId.set(k, [...(byMsgId.get(k) ?? []), r]);
   }
 
+  // browser-local Gmail: the say-do ledger rows the browser needs for reply
+  // detection and "등록됨" badges — ids only, no mail content involved
+  const gmailTracked = isGmailConn
+    ? (
+        await prisma.instruction.findMany({
+          where: { tenantId: tenant.id, authorId: user.id, source: "EMAIL", threadMessageId: { not: null } },
+          select: { id: true, threadMessageId: true, replyReceivedAt: true },
+          orderBy: { createdAt: "desc" },
+          take: 100,
+        })
+      ).map((r) => ({ msgId: r.threadMessageId!, instructionId: r.id, replied: !!r.replyReceivedAt }))
+    : [];
+
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div className="flex items-start justify-between">
@@ -259,9 +273,10 @@ export default async function MailPage({
       {/* capability card — the honest contract for THIS server */}
       {isGmailConn ? (
         <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-          Google 연결(OAuth) — <b>발송 전용 권한(gmail.send)만</b> 사용합니다.
-          Saydog은 회원님의 메일함을 제목·헤더를 포함해 <b>한 글자도 읽을 수 없습니다</b> — 구글 권한 체계가 이를 보장합니다.
-          지시는 아래에서 작성할 때 추적되고, 답변은 메일 속 직답 버튼으로 도착합니다.
+          Google 연결(OAuth) — 서버는 <b>발송 전용 권한(gmail.send)만</b> 갖습니다:
+          Saydog 서버는 회원님의 메일함을 <b>한 글자도 읽을 수 없습니다</b>.
+          메일함 조회가 필요하면 아래 <b>브라우저에서 읽기</b>를 쓰세요 — 조회도 서버를 거치지 않습니다.
+          답변은 메일 속 직답 버튼으로 자동 도착합니다.
         </div>
       ) : isPop3 ? (
         <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-xs leading-5 text-sky-900">
@@ -372,10 +387,11 @@ export default async function MailPage({
       </div>
 
       {isGmailConn ? (
-        <div className="rounded-md border border-gray-200 bg-gray-50 p-3 text-xs text-gray-500">
-          Gmail은 발송 전용이라 메일함 목록·답장 확인 버튼이 없습니다 — 필요하지도 않습니다.
-          상대방이 직답 버튼으로 답하는 순간 대시보드에 ✉ 답장 도착이 표시되고, 회원님의 받은편지함에도 증빙 사본이 쌓입니다.
-        </div>
+        <LocalGmail
+          clientId={process.env.GOOGLE_MAIL_CLIENT_ID ?? ""}
+          tracked={gmailTracked}
+          registered={gmailTracked.map((t) => t.msgId)}
+        />
       ) : (
       <div className="flex items-center justify-between">
         <span className="text-xs text-gray-400">

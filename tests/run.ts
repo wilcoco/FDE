@@ -63,6 +63,9 @@ async function main() {
   console.log("── reply-token ──");
   await (await import("./reply-token.test")).run(t);
 
+  console.log("── gmail-local (browser-side pure logic) ──");
+  await (await import("./gmail-local.test")).run(t);
+
   console.log("── migrations (embedded Postgres) ──");
   await (await import("./migrations.test")).run(t);
 
