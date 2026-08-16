@@ -66,6 +66,9 @@ async function main() {
   console.log("── gmail-local (browser-side pure logic) ──");
   await (await import("./gmail-local.test")).run(t);
 
+  console.log("── mail-template ──");
+  await (await import("./mail-template.test")).run(t);
+
   console.log("── migrations (embedded Postgres) ──");
   await (await import("./migrations.test")).run(t);
 

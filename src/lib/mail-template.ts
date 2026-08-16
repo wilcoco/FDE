@@ -17,12 +17,19 @@ export interface AskMailInput {
   subject: string;
   body: string; // may be empty
   replyUrl: string; // https://…/r/{token}
+  /** 발송 전에 분해된 꼭지 목록 — 일의 전후: 상대는 무엇에 답해야 하는지
+   * 메일 안에서 본다. 답도 이 항목들에 맞춰 돌아온다. */
+  tasks?: string[];
 }
 
 /** Plain-text alternative — the button becomes a bare link. */
 export function askMailText(m: AskMailInput): string {
+  const tasks = (m.tasks ?? []).filter(Boolean);
   return [
     m.body || m.subject,
+    ...(tasks.length
+      ? ["", "요청 항목:", ...tasks.map((t, i) => `  ${i + 1}. ${t}`)]
+      : []),
     "",
     "―――",
     `▶ 아래 링크에서 바로 답변하실 수 있습니다 (가입 불필요):`,
@@ -38,6 +45,13 @@ export function askMailText(m: AskMailInput): string {
 /** HTML alternative — real button, inline styles only (mail clients strip CSS). */
 export function askMailHtml(m: AskMailInput): string {
   const bodyHtml = escapeHtml(m.body || m.subject).replace(/\n/g, "<br/>");
+  const tasks = (m.tasks ?? []).filter(Boolean);
+  const tasksHtml = tasks.length
+    ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;"><tr><td style="padding:14px 18px;font-family:Apple SD Gothic Neo,Malgun Gothic,Segoe UI,sans-serif;">
+      <p style="margin:0 0 8px;font-size:12px;font-weight:700;color:#6b7280;">요청 항목</p>
+      ${tasks.map((t, i) => `<p style="margin:0 0 6px;font-size:14px;line-height:1.6;color:#374151;">${i + 1}. ${escapeHtml(t)}</p>`).join("")}
+    </td></tr></table>`
+    : "";
   return `<!doctype html>
 <html><body style="margin:0;padding:0;background:#f6f7f9;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f7f9;padding:24px 0;">
@@ -47,6 +61,7 @@ export function askMailHtml(m: AskMailInput): string {
     <p style="margin:0 0 4px;font-size:13px;color:#6b7280;">${escapeHtml(m.senderName)} &lt;${escapeHtml(m.senderEmail)}&gt; 님의 요청</p>
     <p style="margin:0 0 16px;font-size:18px;font-weight:700;color:#111827;">${escapeHtml(m.subject)}</p>
     <p style="margin:0 0 24px;font-size:15px;line-height:1.7;color:#374151;">${bodyHtml}</p>
+    ${tasksHtml}
   </td></tr>
   <tr><td align="center" style="padding:0 32px 28px;">
     <a href="${escapeHtml(m.replyUrl)}"

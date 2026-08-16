@@ -23,6 +23,7 @@ export default async function ReplyPage({
       summary: true, rawText: true, createdAt: true, replyReceivedAt: true, status: true,
       author: { select: { name: true } },
       tenant: { select: { name: true } },
+      milestones: { select: { title: true, expectedResult: true }, orderBy: { order: "asc" } },
     },
   });
 
@@ -72,6 +73,22 @@ export default async function ReplyPage({
         <p className="mt-3 whitespace-pre-wrap rounded-md bg-gray-50 p-3 text-sm leading-6 text-gray-700">
           {inst.rawText.slice(0, 2000)}
         </p>
+      )}
+
+      {!(inst.milestones.length <= 1 && inst.milestones[0]?.title === inst.summary) && inst.milestones.length > 0 && (
+        <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3">
+          <p className="text-xs font-semibold text-gray-500">요청 항목 — 아래 항목에 맞춰 답변해 주세요</p>
+          <ol className="mt-2 space-y-1.5">
+            {inst.milestones.map((m, i) => (
+              <li key={i} className="text-sm leading-6 text-gray-700">
+                <span className="font-medium">{i + 1}. {m.title}</span>
+                {m.expectedResult && (
+                  <span className="block pl-4 text-xs text-gray-400">기대 결과: {m.expectedResult}</span>
+                )}
+              </li>
+            ))}
+          </ol>
+        </div>
       )}
 
       {error === "file" && (

@@ -9,6 +9,7 @@ import { notify, notifyEmail } from "@/lib/notify";
 import { atLeast } from "@/lib/rbac";
 import { resolveStatusChange, canReview } from "@/lib/milestone-rules";
 import { runSynthesisForTenant, maybeAutoSynthesize } from "@/lib/synthesis";
+import { composeAndSend } from "./mail";
 import type { MilestoneStatus, Prisma } from "@prisma/client";
 
 /** Capture an owner instruction → AI decomposes into coarse milestones (꼭지). */
@@ -16,6 +17,22 @@ export async function captureInstruction(formData: FormData) {
   const { tenant, user } = await requireContext();
   const rawText = String(formData.get("rawText") ?? "").trim();
   if (!rawText) redirect("/capture?error=empty");
+
+  // 단일화: 받는 사람 이메일이 있으면 이 지시는 메일로 나간다 — 분해·발송·
+  // 직답 토큰·추적을 전부 composeAndSend 한 경로가 책임진다 (지시하기와
+  // 메일→지시는 같은 기능의 두 입구가 아니라 하나의 기능이다).
+  const to = String(formData.get("to") ?? "").trim();
+  if (to) {
+    const lines = rawText.split("\n").map((s) => s.trim()).filter(Boolean);
+    const subject = (lines[0] ?? rawText).slice(0, 100);
+    const body = lines.length > 1 ? lines.slice(1).join("\n") : rawText;
+    const fd = new FormData();
+    fd.set("to", to);
+    fd.set("subject", subject);
+    fd.set("body", body);
+    fd.set("individual", "on");
+    await composeAndSend(fd); // redirects internally
+  }
 
   // delegation chain: this instruction may be spawned FROM a milestone the
   // current user is executing — their "do" becomes their own "say" downward.

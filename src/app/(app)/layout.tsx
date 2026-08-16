@@ -2,22 +2,19 @@ import { requireContext } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import AppShell from "@/components/AppShell";
 
+// MVP nav (창업자 지시 2026-08-16): 본질만 남긴다 — 지시하기 → 답변 받기 →
+// 수행됨 처리. 지시하기와 메일 발송은 /capture 한 입구로 단일화됐고 /mail은
+// 연결·답장 확인용 보조 화면이다. KPI·전략·분석·조직도·프로세스는 숨김
+// (라우트는 살아 있음 — 되살리려면 여기 다시 추가).
 const NAV = [
   { href: "/capture", label: "＋ 지시하기" },
   { href: "/instructions", label: "지시 목록" },
-  { href: "/strategy", label: "전략 통일성" },
-  { href: "/inbox", label: "받은 업무·결재" },
-  { href: "/mail", label: "메일 → 지시" },
   { href: "/dashboard", label: "대시보드" },
-  { href: "/objectives", label: "목표 (OKR·KPI)" },
-  { href: "/analytics", label: "분석" },
-  { href: "/org", label: "조직도" },
+  { href: "/inbox", label: "받은 업무" },
+  { href: "/mail", label: "메일 연결·답장 확인" },
   { href: "/members", label: "멤버" },
 ];
 
-// Process engine is frozen (DECISIONS.md): routes still exist but are no longer
-// surfaced in the nav — the product leads with the say-do spine, not the
-// 3rd-person process paradigm. Re-add entries here to un-freeze.
 const NAV_ADVANCED: { href: string; label: string }[] = [];
 
 export default async function AppLayout({

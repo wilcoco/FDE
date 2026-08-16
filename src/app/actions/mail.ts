@@ -293,6 +293,9 @@ export async function composeAndSend(formData: FormData) {
       subject,
       body: text,
       replyUrl: `${publicUrl}/r/${replyToken}`,
+      // 일의 전후: 분해는 발송 전에 끝났고, 그 꼭지가 메일에 그대로 실린다 —
+      // 상대는 무엇에 답해야 하는지 보면서 답한다 (제목뿐인 지시는 생략)
+      tasks: text ? milestones.map((m) => m.title) : undefined,
     };
     const mail = {
       from: conn.email,
