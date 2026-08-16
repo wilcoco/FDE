@@ -97,6 +97,7 @@ export async function markLocalReply(formData: FormData) {
   const from = String(formData.get("from") ?? "").slice(0, 200) || "(알 수 없음)";
   const subject = String(formData.get("subject") ?? "").slice(0, 300);
   const dateRaw = String(formData.get("date") ?? "");
+  const body = stripQuotedTail(String(formData.get("body") ?? "")).slice(0, 5000);
 
   const inst = await prisma.instruction.findFirst({
     where: { id: instructionId, tenantId: tenant.id, authorId: user.id },
@@ -117,7 +118,7 @@ export async function markLocalReply(formData: FormData) {
         instructionId: inst.id,
         milestoneId: null,
         authorId: user.id,
-        body: `📧 답장 도착(브라우저 감지): ${from} · "${subject}"`,
+        body: `📧 답장 도착(브라우저 감지): ${from} · "${subject}"${body ? `\n${body}` : ""}`,
         mentions: [] as Prisma.InputJsonValue,
       },
     });

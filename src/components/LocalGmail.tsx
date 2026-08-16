@@ -139,11 +139,19 @@ export default function LocalGmail({
   async function recordReply(m: { env: LocalEnvelope; instructionId: string }) {
     setBusy(`r-${m.instructionId}`);
     try {
+      // 기록을 누른 그 답장의 본문을 브라우저가 읽어 함께 올린다 — 지시
+      // 페이지에서 수행 내용을 바로 볼 수 있게 (클릭한 메일만, best-effort)
+      let body = "";
+      try {
+        const full = (await gmailGet(`/messages/${m.env.id}?format=full`)) as GmailMessage;
+        body = extractPlainText(full.payload).slice(0, 5000);
+      } catch { /* 본문 없이도 도착 기록은 진행 */ }
       const fd = new FormData();
       fd.set("instructionId", m.instructionId);
       fd.set("from", m.env.from);
       fd.set("subject", m.env.subject);
       fd.set("date", m.env.date ?? "");
+      fd.set("body", body);
       await markLocalReply(fd); // redirects on success
     } catch (e) {
       setBusy(null);
