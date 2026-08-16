@@ -99,9 +99,9 @@ export default function AppShell({
 
   return (
     <div className="flex min-h-screen">
-      {/* desktop sidebar */}
+      {/* desktop sidebar — sticky: 긴 화면을 스크롤해도 메뉴는 제자리 */}
       <aside className="hidden w-60 shrink-0 border-r border-gray-200 bg-white md:block">
-        {sidebar}
+        <div className="sticky top-0 h-screen overflow-y-auto">{sidebar}</div>
       </aside>
 
       {/* mobile drawer */}
@@ -115,8 +115,8 @@ export default function AppShell({
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* mobile top bar */}
-        <header className="flex items-center gap-3 border-b border-gray-200 bg-white px-4 py-3 md:hidden">
+        {/* mobile top bar — sticky: 스크롤해도 ☰ 메뉴 버튼이 사라지지 않는다 */}
+        <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-gray-200 bg-white px-4 py-3 md:hidden">
           <button
             onClick={() => setOpen(true)}
             aria-label="메뉴 열기"
