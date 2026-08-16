@@ -391,6 +391,7 @@ export default async function MailPage({
           clientId={process.env.GOOGLE_MAIL_CLIENT_ID ?? ""}
           tracked={gmailTracked}
           registered={gmailTracked.map((t) => t.msgId)}
+          selfEmail={conn.email}
         />
       ) : (
       <div className="flex items-center justify-between">

@@ -49,11 +49,12 @@ function loadGis(): Promise<GsiOauth2> {
 }
 
 export default function LocalGmail({
-  clientId, tracked, registered,
+  clientId, tracked, registered, selfEmail,
 }: {
   clientId: string;
   tracked: TrackedSay[];
   registered: string[];
+  selfEmail: string;
 }) {
   const tokenRef = useRef<string | null>(null);
   const [phase, setPhase] = useState<"idle" | "loading" | "ready">("idle");
@@ -85,7 +86,7 @@ export default function LocalGmail({
     try {
       const [sentEnvs, inboxEnvs] = await Promise.all([listLabel("SENT", 15), listLabel("INBOX", 25)]);
       setSent(sentEnvs);
-      setReplies(matchReplies(inboxEnvs, tracked));
+      setReplies(matchReplies(inboxEnvs, tracked, selfEmail));
       setPhase("ready");
     } catch (e) {
       setError(e instanceof Error ? e.message : "메일을 읽지 못했습니다");

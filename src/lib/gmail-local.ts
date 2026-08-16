@@ -3,7 +3,7 @@
 // "지시로 등록"을 눌러 고른 결과만 서버로 간다 (구글 restricted-scope 면제
 // 조항의 "user-configured transmissions" 구조). No IO — fully testable.
 
-import { normalizeMessageId, extractThreadRefs } from "./inbound-email";
+import { normalizeMessageId, extractThreadRefs, normalizeEmail } from "./inbound-email";
 
 export interface GmailHeader { name: string; value: string }
 export interface GmailPayload {
@@ -99,14 +99,19 @@ export function toEnvelope(msg: GmailMessage): LocalEnvelope {
   };
 }
 
-/** Inbox envelopes that answer one of MY tracked, still-waiting SAYs. */
+/** Inbox envelopes that answer one of MY tracked, still-waiting SAYs.
+ * 자기 자신이 보낸 메일(직답의 [Saydog 직답] 증빙 전달 사본 등)은 스레드
+ * 헤더를 달고 내 받은함에 들어오지만 답장이 아니다 — 발신자가 나면 제외. */
 export function matchReplies(
   inbox: LocalEnvelope[],
   tracked: { msgId: string; instructionId: string; replied: boolean }[],
+  selfEmail = "",
 ): { env: LocalEnvelope; instructionId: string }[] {
+  const self = selfEmail.trim().toLowerCase();
   const waiting = new Map(tracked.filter((t) => !t.replied).map((t) => [t.msgId, t.instructionId]));
   const out: { env: LocalEnvelope; instructionId: string }[] = [];
   for (const env of inbox) {
+    if (self && normalizeEmail(env.from) === self) continue;
     for (const ref of env.refs) {
       const inst = waiting.get(ref);
       if (inst) {

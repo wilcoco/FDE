@@ -61,7 +61,13 @@ export function buildMessage(m: OutgoingMail, now = new Date()): string {
     `To: ${m.to.map((a) => `<${a}>`).join(", ")}`,
     `Subject: ${encodeHeaderWord(m.subject)}`,
     `Message-ID: <${m.messageId}>`,
-    ...(m.inReplyTo ? [`In-Reply-To: <${m.inReplyTo}>`, `References: <${m.inReplyTo}>`] : []),
+    // 새 메일에도 References에 자기 ID를 심는다: Gmail API가 발송 시
+    // Message-ID를 자기 것으로 바꿔 달아도, 답장은 RFC 5322 규칙으로
+    // References를 상속하므로 우리가 저장한 ID가 답장 안에 살아 돌아온다
+    // — 읽기 스코프 없이도 스레드 매칭이 깨지지 않는 생존 장치.
+    ...(m.inReplyTo
+      ? [`In-Reply-To: <${m.inReplyTo}>`, `References: <${m.inReplyTo}>`]
+      : [`References: <${m.messageId}>`]),
     `Date: ${now.toUTCString().replace("GMT", "+0000")}`,
     "MIME-Version: 1.0",
   ];

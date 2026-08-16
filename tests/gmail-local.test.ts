@@ -100,4 +100,16 @@ export async function run(t: T) {
     assert.equal(out[0].instructionId, "i1");
     assert.equal(out[0].env.messageId, "r1@x");
   });
+
+  await t("matchReplies: 자기 자신이 보낸 직답 전달 사본은 답장으로 오인하지 않는다", () => {
+    const tracked = [{ msgId: "say-1@g", instructionId: "i1", replied: false }];
+    const inbox = [
+      // [Saydog 직답] evidence forward: from ME, threaded onto my own SAY
+      toEnvelope(msg({ "Message-ID": "<fwd@x>", "In-Reply-To": "<say-1@g>", From: "김대표 <CEO@icams.co.kr>", Subject: "Re: 견적" })),
+    ];
+    assert.equal(matchReplies(inbox, tracked, "ceo@icams.co.kr").length, 0);
+    // 진짜 상대의 답장은 여전히 잡힌다
+    const real = [toEnvelope(msg({ "Message-ID": "<r@x>", "In-Reply-To": "<say-1@g>", From: "협력사 <partner@x.com>" }))];
+    assert.equal(matchReplies(real, tracked, "ceo@icams.co.kr").length, 1);
+  });
 }

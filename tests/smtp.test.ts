@@ -234,6 +234,15 @@ export async function run(t: (name: string, fn: () => void | Promise<void>) => v
     assert.match(msg, /filename="=\?UTF-8\?B\?/); // 한글 파일명 encoded
   });
 
+  await t("buildMessage: fresh mail carries References: <own id> — survives Gmail Message-ID rewriting", () => {
+    const msg = buildMessage({ from: "a@b", to: ["c@d"], subject: "s", text: "t", messageId: "say-1@b" });
+    assert.match(msg, /References: <say-1@b>/);
+    // reply path unchanged: parent id, not self
+    const reply = buildMessage({ from: "a@b", to: ["c@d"], subject: "s", text: "t", inReplyTo: "parent@x", messageId: "m2@b" });
+    assert.match(reply, /References: <parent@x>/);
+    assert.ok(!/References: <m2@b>/.test(reply));
+  });
+
   await t("deriveSmtp: known providers mapped, company falls back to same host:587", () => {
     assert.deepEqual(deriveSmtp("imap.naver.com"), { host: "smtp.naver.com", port: 465 });
     assert.deepEqual(deriveSmtp("imap.gmail.com"), { host: "smtp.gmail.com", port: 465 });
