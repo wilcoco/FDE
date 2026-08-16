@@ -11,8 +11,9 @@ import type { Column, CellValue } from "@/lib/datatable";
 import {
   updateMilestone, assignMilestoneOwner, setMilestoneStatus, addMilestoneProof,
   addMilestone, deleteMilestone, linkInstructionObjective, archiveInstruction,
-  regenerateInstruction, approveMilestone, returnMilestone, completeFromReply,
+  regenerateInstruction, approveMilestone, returnMilestone, completeFromReply, deleteInstruction,
 } from "@/app/actions/capture";
+import DangerButton from "@/components/DangerButton";
 import SubmitButton from "@/components/SubmitButton";
 
 interface ProofItem { type: string; value: string; by: string; at: string }
@@ -132,14 +133,25 @@ export default async function InstructionDetail({ params }: { params: Promise<{ 
             </div>
           )}
         </div>
-        <form action={linkInstructionObjective} className="flex items-center gap-1">
-          <input type="hidden" name="id" value={inst.id} />
-          <select name="objectiveId" defaultValue={inst.objectiveId ?? ""} className="input py-1 text-xs">
-            <option value="">목표 연결</option>
-            {objectives.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}
-          </select>
-          <button className="btn-ghost text-xs">저장</button>
-        </form>
+        <div className="flex items-center gap-3">
+          <form action={linkInstructionObjective} className="flex items-center gap-1">
+            <input type="hidden" name="id" value={inst.id} />
+            <select name="objectiveId" defaultValue={inst.objectiveId ?? ""} className="input py-1 text-xs">
+              <option value="">목표 연결</option>
+              {objectives.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}
+            </select>
+            <button className="btn-ghost text-xs">저장</button>
+          </form>
+          {canConfirm && (
+            <form action={deleteInstruction}>
+              <input type="hidden" name="instructionId" value={inst.id} />
+              <DangerButton
+                label="🗑 삭제"
+                message="이 지시와 모든 꼭지·답변 기록이 삭제됩니다. 끝난 일은 삭제 대신 완료 처리를 권장합니다. 삭제할까요?"
+              />
+            </form>
+          )}
+        </div>
       </div>
 
       <details className="card">

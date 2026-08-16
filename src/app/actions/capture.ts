@@ -167,6 +167,39 @@ export async function finalizeCapture(formData: FormData) {
   redirect(`/instructions/${instruction.id}`);
 }
 
+/**
+ * 지시 삭제 — 작성자 본인 또는 관리자만. 오기입·테스트 지시 정리용이며,
+ * 끝난 일은 삭제가 아니라 완료 처리가 정도(장부는 증빙이다).
+ * 꼭지·댓글·직답 파일은 스키마 cascade가 지우고, 직답 토큰은 즉시 무효가 된다.
+ */
+export async function deleteInstruction(formData: FormData) {
+  const { tenant, user } = await requireContext();
+  const instructionId = String(formData.get("instructionId") ?? "");
+  const inst = await prisma.instruction.findFirst({
+    where: { id: instructionId, tenantId: tenant.id },
+    select: { id: true, authorId: true, summary: true, rawText: true },
+  });
+  if (!inst) redirect("/instructions");
+  if (inst.authorId !== user.id && !atLeast(user.role, "ADMIN")) redirect(`/instructions/${inst.id}`);
+
+  await prisma.$transaction(async (tx) => {
+    // 감사 기록을 먼저 — 무엇이 지워졌는지는 남는다
+    await tx.auditLog.create({
+      data: {
+        tenantId: tenant.id,
+        actorId: user.id,
+        action: "INSTRUCTION_DELETED",
+        target: `${inst.id} · ${(inst.summary ?? inst.rawText).slice(0, 120)}`,
+      },
+    });
+    await tx.instruction.delete({ where: { id: inst.id } });
+  });
+
+  revalidatePath("/instructions");
+  revalidatePath("/dashboard");
+  redirect("/instructions");
+}
+
 /** Re-generate the milestone set from additional owner guidance (refine loop). */
 export async function regenerateInstruction(formData: FormData) {
   const { tenant } = await requireContext();
