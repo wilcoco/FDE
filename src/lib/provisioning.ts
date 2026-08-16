@@ -91,30 +91,6 @@ export async function createTenantWithOwner(
         positionId: ceo.id,
       } as Prisma.UserUncheckedCreateInput,
     });
-    // seed one sample instruction so the first screen isn't empty — a founder
-    // sees the say→do→verify shape immediately instead of a blank dashboard.
-    const sample = await tx.instruction.create({
-      data: {
-        tenantId: tenant.id,
-        authorId: user.id,
-        rawText: SAMPLE_INSTRUCTION.rawText,
-        summary: SAMPLE_INSTRUCTION.summary,
-        source: "TEXT",
-      },
-    });
-    await tx.milestone.createMany({
-      data: SAMPLE_INSTRUCTION.milestones.map((m, i) => ({
-        tenantId: tenant.id,
-        instructionId: sample.id,
-        order: i,
-        title: m.title,
-        expectedResult: m.expectedResult,
-        status: (i === 0 ? "ACTIVE" : "PENDING") as Prisma.MilestoneCreateManyInput["status"],
-        activatedAt: i === 0 ? new Date() : null,
-        proof: [] as Prisma.InputJsonValue,
-      })),
-    });
-
     await tx.auditLog.create({
       data: { tenantId: tenant.id, actorId: user.id, action: "TENANT_CREATED", target: tenant.id },
     });
@@ -122,14 +98,6 @@ export async function createTenantWithOwner(
   });
 }
 
-/** Example instruction seeded into every new company — teaches the shape. */
-const SAMPLE_INSTRUCTION = {
-  rawText:
-    "[예시] 이건 FlowDesk 사용법을 보여주는 샘플 지시입니다. 실제 지시는 왼쪽 위 '＋ 지시하기'로 만드세요. — 다음 주까지 신제품 브로슈어 초안 잡고, 인쇄소 견적 세 곳 받아서 비교해줘.",
-  summary: "[예시] 신제품 브로슈어 준비 — 초안 + 인쇄 견적 비교",
-  milestones: [
-    { title: "브로슈어 초안 작성", expectedResult: "핵심 메시지·이미지 배치가 담긴 1차 시안" },
-    { title: "인쇄소 견적 3곳 확보", expectedResult: "업체명·단가·납기가 정리된 비교표" },
-    { title: "비교 후 최종 발주", expectedResult: "선정 사유와 발주 확정" },
-  ],
-};
+// (샘플 지시 시딩은 제거됨 — 새 회사는 빈 대시보드로 시작한다. 창업자 결정,
+//  2026-08-16. 기존에 심어진 샘플은 20260816000000_remove_sample_instruction
+//  데이터 마이그레이션이 배포 시 삭제한다.)
