@@ -1,6 +1,7 @@
 import { requireContext } from "@/lib/session";
 import { prisma } from "@/lib/db";
 import AppShell from "@/components/AppShell";
+import AutoSync from "@/components/AutoSync";
 
 // MVP nav (창업자 지시 2026-08-16): 본질만 남긴다 — 지시하기 → 답변 받기 →
 // 수행됨 처리. 지시하기와 메일 발송은 /capture 한 입구로 단일화됐고 /mail은
@@ -38,6 +39,7 @@ export default async function AppLayout({
       userRole={user.role}
       unread={unread}
     >
+      <AutoSync />
       {children}
     </AppShell>
   );

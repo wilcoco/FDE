@@ -5,7 +5,7 @@
 // API 호출도 전부 이 브라우저에서 직접 나간다. 서버로 가는 것은 사용자가
 // 버튼으로 고른 결과뿐: [지시로 등록](+선택한 본문), [답장 도착 기록].
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { registerLocalMail, markLocalReply } from "@/app/actions/local-mail";
 import {
   toEnvelope, extractPlainText, matchReplies,
@@ -16,7 +16,7 @@ const READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 const META = "format=metadata&metadataHeaders=Message-ID&metadataHeaders=In-Reply-To&metadataHeaders=References&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc";
 
-interface TokenClient { requestAccessToken: () => void }
+interface TokenClient { requestAccessToken: (cfg?: { prompt?: string }) => void }
 interface GsiOauth2 {
   initTokenClient: (cfg: {
     client_id: string;
@@ -94,27 +94,54 @@ export default function LocalGmail({
     }
   }
 
-  async function connect() {
-    setError(null);
+  async function connect(silent = false) {
+    if (!silent) setError(null);
     try {
       const oauth2 = await loadGis();
+      let settled = false;
       const tc = oauth2.initTokenClient({
         client_id: clientId,
         scope: READ_SCOPE,
         callback: (resp) => {
+          settled = true;
           if (resp.access_token) {
             tokenRef.current = resp.access_token; // memory only — never persisted, never sent to our server
+            localStorage.setItem("fd-gmail-linked", "1"); // 다음에 깨어날 때 무팝업 재시도의 근거
             void refresh();
-          } else {
+          } else if (!silent) {
             setError(resp.error ?? "권한이 승인되지 않았습니다");
           }
         },
       });
-      tc.requestAccessToken();
+      // silent: 이전 승인이 있으면 UI 없이 토큰이 온다. 팝업이 필요해지면
+      // 차단되어 콜백이 안 올 수 있으니 5초 후 조용히 포기(버튼 경로로).
+      tc.requestAccessToken(silent ? { prompt: "" } : undefined);
+      if (silent) setTimeout(() => { if (!settled) { /* idle 유지 */ } }, 5000);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "연결 실패");
+      if (!silent) setError(e instanceof Error ? e.message : "연결 실패");
     }
   }
+
+  // 앱이 열리거나 탭이 깨어날 때 스스로 갱신 — 토큰이 살아 있으면 목록만
+  // 다시 읽고, 이전에 연결한 적 있으면 무팝업으로 토큰을 재시도한다.
+  const wakeAt = useRef(0);
+  useEffect(() => {
+    const wake = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - wakeAt.current < 2 * 60 * 1000) return; // 2분 스로틀
+      wakeAt.current = Date.now();
+      if (tokenRef.current) void refresh();
+      else if (localStorage.getItem("fd-gmail-linked")) void connect(true);
+    };
+    wake(); // 마운트 = 화면을 연 순간
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("focus", wake);
+    return () => {
+      document.removeEventListener("visibilitychange", wake);
+      window.removeEventListener("focus", wake);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function register(env: LocalEnvelope, withBody: boolean) {
     setBusy(env.id + (withBody ? "b" : ""));
@@ -176,7 +203,7 @@ export default function LocalGmail({
 
       {phase !== "ready" && (
         <button
-          onClick={connect}
+          onClick={() => void connect()}
           disabled={phase === "loading"}
           className="btn w-full py-2.5 text-sm"
         >

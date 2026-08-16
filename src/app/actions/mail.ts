@@ -364,6 +364,40 @@ export async function syncReplies() {
   // replies land through the 직답 button directly.
   if (conn.provider === "gmail" && conn.refresh) redirect("/mail?error=gmailsync");
 
+  const matched = await runReplySync(tenant.id, user.id, conn);
+  revalidatePath("/mail");
+  revalidatePath("/dashboard");
+  redirect(`/mail?synced=${matched}`);
+}
+
+/**
+ * 앱이 열리거나 깨어날 때의 조용한 갱신 — AutoSync 클라이언트가 호출한다.
+ * redirect 없음, 실패는 삼킨다(자동 경로가 화면을 깨면 안 된다). Gmail은
+ * 서버가 읽을 수 없으므로 스킵 (브라우저 카드가 자체적으로 깨어난다).
+ */
+export async function autoSyncReplies(): Promise<{ matched: number }> {
+  const { tenant, user } = await requireContext();
+  const conn = await loadMailConn(user.id);
+  if (!conn || (conn.provider === "gmail" && conn.refresh)) return { matched: 0 };
+  try {
+    const matched = await runReplySync(tenant.id, user.id, conn);
+    if (matched > 0) {
+      revalidatePath("/mail");
+      revalidatePath("/dashboard");
+    }
+    return { matched };
+  } catch {
+    return { matched: 0 };
+  }
+}
+
+async function runReplySync(
+  tenantId: string,
+  userId: string,
+  conn: NonNullable<Awaited<ReturnType<typeof loadMailConn>>>,
+): Promise<number> {
+  const tenant = { id: tenantId };
+  const user = { id: userId };
   const inbox = await listRecentInbox(conn, 30).catch(() => []);
   const candidates = inbox.filter((m) => m.inReplyTo || m.references);
 
@@ -408,7 +442,5 @@ export async function syncReplies() {
   }
 
   await prisma.mailConnection.updateMany({ where: { userId: user.id }, data: { lastSyncAt: new Date() } });
-  revalidatePath("/mail");
-  revalidatePath("/dashboard");
-  redirect(`/mail?synced=${matched}`);
+  return matched;
 }
