@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { captureInstruction } from "@/app/actions/capture";
 import VoiceCapture from "@/components/VoiceCapture";
 import SubmitButton from "@/components/SubmitButton";
+import CaptureForm from "@/components/CaptureForm";
 import { sttConfigured } from "@/lib/stt";
 
 const EXAMPLE = "예: 다음 달 신제품 출시 준비해. 마케팅은 홍보안 잡고, 영업은 주요 거래처 사전 영업 돌리고, 생산은 초도 물량 확보해서 출시일 맞춰줘.";
@@ -59,27 +60,19 @@ export default async function CapturePage({
         </div>
       )}
 
-      <form action={captureInstruction} className="card space-y-4">
-        {parent && <input type="hidden" name="parentMilestoneId" value={parent.id} />}
-        <VoiceCapture name="rawText" placeholder={EXAMPLE} serverStt={serverStt} />
-        {!parent && (
-          <label className="block">
-            <span className="text-xs font-medium text-gray-600">받는 사람 이메일 (선택 · 쉼표로 여러 명)</span>
-            <input
-              name="to"
-              placeholder="적으면 메일로 지시가 나갑니다 — 꼭지 목록과 직답 버튼이 함께 실립니다"
-              className="input mt-1 w-full"
-            />
-            <span className="mt-0.5 block text-[11px] text-gray-400">
-              비우면 사내 지시로만 기록됩니다. 첫 줄이 메일 제목이 됩니다.
-            </span>
-          </label>
-        )}
-        <div className="flex items-center justify-between">
-          <p className="text-xs text-gray-400">결재·비용·분기 등 자연어로 말하면 AI가 알아서 꼭지로 정리합니다.</p>
-          <SubmitButton pendingText="AI가 꼭지 만드는 중…">AI로 꼭지 만들기</SubmitButton>
-        </div>
-      </form>
+      {parent ? (
+        <form action={captureInstruction} className="card space-y-4">
+          <input type="hidden" name="parentMilestoneId" value={parent.id} />
+          <VoiceCapture name="rawText" placeholder={EXAMPLE} serverStt={serverStt} />
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-gray-400">결재·비용·분기 등 자연어로 말하면 AI가 알아서 꼭지로 정리합니다.</p>
+            <SubmitButton pendingText="AI가 꼭지 만드는 중…">AI로 꼭지 만들기</SubmitButton>
+          </div>
+        </form>
+      ) : (
+        // 일의 전후: 분해 → 지시자 확정 → 그때 등록·발송 (2단계)
+        <CaptureForm serverStt={serverStt} />
+      )}
     </div>
   );
 }

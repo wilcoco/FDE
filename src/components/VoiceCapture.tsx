@@ -13,12 +13,14 @@ export default function VoiceCapture({
   name,
   placeholder,
   serverStt = false,
+  defaultValue = "",
 }: {
   name: string;
   placeholder?: string;
   serverStt?: boolean;
+  defaultValue?: string;
 }) {
-  const [text, setText] = useState("");
+  const [text, setText] = useState(defaultValue);
   const [recording, setRecording] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);

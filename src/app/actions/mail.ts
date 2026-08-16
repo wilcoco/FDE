@@ -232,15 +232,32 @@ export async function composeAndSend(formData: FormData) {
     await pop3Test({ host: conn.host, port: conn.port, user: smtp.user, pass: conn.pass }).catch(() => {});
   }
 
-  // decompose ONCE — the same body applies to every recipient's loop
-  let summary = subject;
-  let milestones: { title: string; expectedResult: string | null }[];
-  if (text) {
-    const gen = await generateMilestones(`${subject}\n\n${text}`);
-    summary = gen.summary || summary;
-    milestones = gen.milestones.map((m) => ({ title: m.title, expectedResult: m.expectedResult || null }));
-  } else {
-    milestones = [{ title: subject, expectedResult: null }];
+  // decompose ONCE — the same body applies to every recipient's loop.
+  // 미리보기에서 지시자가 확정한 꼭지(tasksJson)가 오면 그대로 쓴다 —
+  // 재분해 금지: 지시자가 본 구조가 곧 상대가 볼 구조다 (일의 전후).
+  let summary = String(formData.get("summary") ?? "").trim().slice(0, 100) || subject;
+  let milestones: { title: string; expectedResult: string | null }[] = [];
+  const tasksJson = String(formData.get("tasksJson") ?? "");
+  if (tasksJson) {
+    try {
+      const parsed = JSON.parse(tasksJson) as unknown;
+      if (Array.isArray(parsed)) {
+        milestones = parsed
+          .filter((t): t is { title: string; expectedResult?: string | null } =>
+            !!t && typeof (t as { title?: unknown }).title === "string" && !!(t as { title: string }).title.trim())
+          .map((t) => ({ title: t.title.trim().slice(0, 200), expectedResult: t.expectedResult?.trim?.() || null }))
+          .slice(0, 20);
+      }
+    } catch { /* fall through to fresh decomposition */ }
+  }
+  if (milestones.length === 0) {
+    if (text) {
+      const gen = await generateMilestones(`${subject}\n\n${text}`);
+      summary = gen.summary || summary;
+      milestones = gen.milestones.map((m) => ({ title: m.title, expectedResult: m.expectedResult || null }));
+    } else {
+      milestones = [{ title: subject, expectedResult: null }];
+    }
   }
 
   const createInstruction = (messageId: string, counterparty: string | null, replyToken: string) =>

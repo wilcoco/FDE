@@ -18,21 +18,9 @@ export async function captureInstruction(formData: FormData) {
   const rawText = String(formData.get("rawText") ?? "").trim();
   if (!rawText) redirect("/capture?error=empty");
 
-  // 단일화: 받는 사람 이메일이 있으면 이 지시는 메일로 나간다 — 분해·발송·
-  // 직답 토큰·추적을 전부 composeAndSend 한 경로가 책임진다 (지시하기와
-  // 메일→지시는 같은 기능의 두 입구가 아니라 하나의 기능이다).
-  const to = String(formData.get("to") ?? "").trim();
-  if (to) {
-    const lines = rawText.split("\n").map((s) => s.trim()).filter(Boolean);
-    const subject = (lines[0] ?? rawText).slice(0, 100);
-    const body = lines.length > 1 ? lines.slice(1).join("\n") : rawText;
-    const fd = new FormData();
-    fd.set("to", to);
-    fd.set("subject", subject);
-    fd.set("body", body);
-    fd.set("individual", "on");
-    await composeAndSend(fd); // redirects internally
-  }
+  // (메일 발송 지시는 previewTasks → finalizeCapture 2단계 경로가 담당한다 —
+  //  일의 전후: 지시자가 꼭지를 확정한 뒤에만 발송된다. 이 함수는 위임 사슬
+  //  등 내부 지시 직행 경로.)
 
   // delegation chain: this instruction may be spawned FROM a milestone the
   // current user is executing — their "do" becomes their own "say" downward.
@@ -93,6 +81,89 @@ export async function captureInstruction(formData: FormData) {
   // strategic coherence: re-synthesize in the background every few instructions
   void maybeAutoSynthesize(tenant.id, user.id);
 
+  redirect(`/instructions/${instruction.id}`);
+}
+
+/**
+ * 1단계 — 분해 미리보기. 지시문을 AI가 꼭지로 나눠 돌려주기만 하고, 아무것도
+ * 저장·발송하지 않는다. 지시자가 빼고 고친 뒤 finalizeCapture로 확정한다.
+ * (일의 전후: 상대에게 나갈 구조의 최종 결정권은 지시자에게 있다.)
+ */
+export async function previewTasks(
+  formData: FormData,
+): Promise<{ summary: string; tasks: { title: string; expectedResult: string | null }[] } | { error: string }> {
+  await requireContext();
+  const rawText = String(formData.get("rawText") ?? "").trim();
+  if (!rawText) return { error: "지시 내용을 입력해주세요." };
+  try {
+    const gen = await generateMilestones(rawText);
+    return {
+      summary: (gen.summary || rawText.split("\n")[0]).slice(0, 100),
+      tasks: gen.milestones.map((m) => ({ title: m.title, expectedResult: m.expectedResult || null })),
+    };
+  } catch {
+    return { error: "AI 분해에 실패했습니다. 잠시 후 다시 시도해주세요." };
+  }
+}
+
+/** 2단계 — 지시자가 확정한 꼭지로 등록(+받는 사람이 있으면 발송). */
+export async function finalizeCapture(formData: FormData) {
+  const { tenant, user } = await requireContext();
+  const rawText = String(formData.get("rawText") ?? "").trim();
+  const to = String(formData.get("to") ?? "").trim();
+  const summary = String(formData.get("summary") ?? "").trim().slice(0, 100) || rawText.slice(0, 80);
+  if (!rawText) redirect("/capture?error=empty");
+
+  let tasks: { title: string; expectedResult: string | null }[] = [];
+  try {
+    const parsed = JSON.parse(String(formData.get("tasksJson") ?? "[]")) as unknown;
+    if (Array.isArray(parsed)) {
+      tasks = parsed
+        .filter((t): t is { title: string; expectedResult?: string | null } =>
+          !!t && typeof (t as { title?: unknown }).title === "string" && !!(t as { title: string }).title.trim())
+        .map((t) => ({ title: t.title.trim().slice(0, 200), expectedResult: t.expectedResult?.trim?.() || null }))
+        .slice(0, 20);
+    }
+  } catch { /* fall through to single-task fallback */ }
+  if (tasks.length === 0) tasks = [{ title: summary, expectedResult: null }];
+
+  if (to) {
+    // 메일 지시: 확정된 꼭지 그대로 발송·추적 — composeAndSend는 재분해하지 않는다
+    const fd = new FormData();
+    fd.set("to", to);
+    fd.set("subject", summary);
+    fd.set("body", rawText);
+    fd.set("individual", "on");
+    fd.set("summary", summary);
+    fd.set("tasksJson", JSON.stringify(tasks));
+    await composeAndSend(fd); // redirects internally
+    return;
+  }
+
+  // 사내 지시: captureInstruction과 동일 의미론, 꼭지만 지시자 확정본으로
+  const instruction = await prisma.$transaction(async (tx) => {
+    const inst = await tx.instruction.create({
+      data: { tenantId: tenant.id, authorId: user.id, rawText, summary, source: "TEXT" },
+    });
+    await tx.milestone.createMany({
+      data: tasks.map((m, i) => ({
+        tenantId: tenant.id,
+        instructionId: inst.id,
+        order: i,
+        title: m.title,
+        expectedResult: m.expectedResult,
+        status: "PENDING" as MilestoneStatus,
+        activatedAt: null,
+        proof: [] as Prisma.InputJsonValue,
+      })),
+    });
+    await tx.auditLog.create({
+      data: { tenantId: tenant.id, actorId: user.id, action: "INSTRUCTION_CAPTURED", target: inst.id },
+    });
+    return inst;
+  });
+
+  void maybeAutoSynthesize(tenant.id, user.id);
   redirect(`/instructions/${instruction.id}`);
 }
 
