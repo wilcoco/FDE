@@ -14,9 +14,20 @@ export default async function CapturePage({
 }: {
   searchParams: Promise<{ from?: string }>;
 }) {
-  const { tenant } = await requireContext();
+  const { tenant, user } = await requireContext();
   const { from } = await searchParams;
   const serverStt = sttConfigured();
+
+  // 받는 사람 추천 원천 ①: 과거 지시 상대 원장 (② 브라우저 수확분은 클라이언트에서 병합)
+  const pastLoops = await prisma.instruction.findMany({
+    where: { tenantId: tenant.id, authorId: user.id, counterparty: { not: null } },
+    select: { counterparty: true },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+  const recentCounterparties = [...new Set(
+    pastLoops.flatMap((r) => (r.counterparty ?? "").split(",").map((e) => e.trim()).filter(Boolean)),
+  )].slice(0, 8);
 
   // delegation chain: capturing FROM a milestone — my "do" becomes my "say"
   const parent = from
@@ -70,8 +81,8 @@ export default async function CapturePage({
           </div>
         </form>
       ) : (
-        // 일의 전후: 분해 → 지시자 확정 → 그때 등록·발송 (2단계)
-        <CaptureForm serverStt={serverStt} />
+        // 일의 전후: 간단=쓰기→대상→발송 / 복합=쓰기→구조 확정→대상→발송
+        <CaptureForm serverStt={serverStt} recent={recentCounterparties} />
       )}
     </div>
   );

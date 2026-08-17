@@ -69,6 +69,9 @@ async function main() {
   console.log("── mail-template ──");
   await (await import("./mail-template.test")).run(t);
 
+  console.log("── address-book (+ mail draft fallback) ──");
+  await (await import("./address-book.test")).run(t);
+
   console.log("── migrations (embedded Postgres) ──");
   await (await import("./migrations.test")).run(t);
 

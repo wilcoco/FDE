@@ -154,7 +154,7 @@ async function main() {
     "다음 주 금요일까지 신제품 포장재 견적 진행해주세요. 단가표 회신해 주시고, 납기 일정과 최소 발주 수량도 함께 알려주세요.");
   await b.fill('input[name="to"]', PARTNER_EMAIL);
   await shot(b, "capture-step1");
-  await b.click('button:has-text("꼭지 나누기")');
+  await b.click('button:has-text("꼭지 나누어 다듬기")');
   await b.waitForSelector("text=2단계");
   await shot(b, "capture-step2-preview");
 
@@ -230,6 +230,32 @@ async function main() {
   await settle(b);
   await shot(b, "instruction-completed");
   note("OK", "✅ 수행됨 처리 (결과 한 줄 기록)");
+
+  // ── 시나리오 A: 빠른 보내기 (AI 초안 · 요청 항목 없는 메일 · 답장 대기) ──
+  const PARTNER2 = `partner2-${RUN}@test.local`;
+  await b.goto(`${BASE}/capture`);
+  await settle(b);
+  // 이전 발송 상대가 DB 원장 칩으로 떠야 한다
+  const chipVisible = await b.locator(`button:has-text("${PARTNER_EMAIL}")`).count();
+  note(chipVisible ? "OK" : "ISSUE", `과거 상대 추천 칩: ${chipVisible ? "보임" : "없음"}`);
+  await b.fill('textarea[name="rawText"]', "내일까지 포장재 샘플 3종 보내주실 수 있는지 확인 부탁합니다.");
+  await b.fill('input[name="to"]', PARTNER2);
+  await shot(b, "quick-send");
+  await b.click('button:has-text("바로 보내기")');
+  await b.waitForURL("**/instructions/**");
+  const quickInstUrl = b.url();
+  await settle(b);
+  const waiting = await b.locator("text=답장 대기").count();
+  note(waiting ? "OK" : "ISSUE", `빠른 보내기 → 지시 생성 + 답장 대기: ${waiting ? "✅" : "❌"}`);
+  await new Promise((r) => setTimeout(r, 1200));
+  const quickMail = captured.find((c) => c.rcpt.some((r2) => r2.includes("partner2")));
+  if (!quickMail) note("ISSUE", "빠른 보내기 메일이 목 SMTP에 없음");
+  else {
+    const qt = textOf(quickMail);
+    note(!/요청 항목/.test(qt) ? "OK" : "ISSUE", "간단 지시 메일에 요청 항목 블록 없음 (중복 방지)");
+    note(/\/r\/[a-f0-9-]+/.test(qt) ? "OK" : "ISSUE", "빠른 보내기 메일에도 직답 링크 포함");
+  }
+  void quickInstUrl;
 
   // 증빙 전달 사본 (best-effort) 확인
   await new Promise((r) => setTimeout(r, 2000));

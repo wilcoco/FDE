@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requireContext } from "@/lib/session";
-import { generateMilestones, regenerateMilestones } from "@/lib/ai";
+import { generateMilestones, regenerateMilestones, draftAskMail } from "@/lib/ai";
 import { notify, notifyEmail } from "@/lib/notify";
 import { atLeast } from "@/lib/rbac";
 import { resolveStatusChange, canReview } from "@/lib/milestone-rules";
@@ -165,6 +165,41 @@ export async function finalizeCapture(formData: FormData) {
 
   void maybeAutoSynthesize(tenant.id, user.id);
   redirect(`/instructions/${instruction.id}`);
+}
+
+/**
+ * 빠른 보내기 — 시나리오 A/C: 간단한 지시는 미리보기 없이 즉시.
+ * 받는 사람이 있으면 AI가 제목·본문을 다듬어(분해 아님) 바로 발송하고
+ * 답장 대기 상태가 된다. 없으면 꼭지 1개짜리 사내 지시로 즉시 등록.
+ * 원본 지시문(rawText)은 어느 경로든 그대로 장부에 남는다.
+ */
+export async function quickSend(formData: FormData) {
+  await requireContext();
+  const rawText = String(formData.get("rawText") ?? "").trim();
+  if (!rawText) redirect("/capture?error=empty");
+  const to = String(formData.get("to") ?? "").trim();
+
+  if (to) {
+    const draft = await draftAskMail(rawText);
+    const fd = new FormData();
+    fd.set("to", to);
+    fd.set("subject", draft.subject);
+    fd.set("body", draft.body);
+    fd.set("individual", "on");
+    fd.set("summary", draft.subject);
+    fd.set("tasksJson", JSON.stringify([{ title: draft.subject, expectedResult: null }]));
+    fd.set("rawOriginal", rawText); // 장부엔 사장이 실제 말한 문장이 남는다
+    await composeAndSend(fd); // 발송 → 지시 생성 → 답장 대기 (redirects)
+    return;
+  }
+
+  const summary = (rawText.split("\n").map((s) => s.trim()).filter(Boolean)[0] ?? rawText).slice(0, 100);
+  const fd = new FormData();
+  fd.set("rawText", rawText);
+  fd.set("to", "");
+  fd.set("summary", summary);
+  fd.set("tasksJson", JSON.stringify([{ title: summary, expectedResult: null }]));
+  await finalizeCapture(fd); // redirects
 }
 
 /**

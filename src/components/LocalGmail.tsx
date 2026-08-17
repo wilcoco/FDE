@@ -11,6 +11,7 @@ import {
   toEnvelope, extractPlainText, matchReplies,
   type GmailMessage, type LocalEnvelope,
 } from "@/lib/gmail-local";
+import { harvestAddresses } from "@/lib/address-book";
 
 const READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
@@ -87,6 +88,8 @@ export default function LocalGmail({
       const [sentEnvs, inboxEnvs] = await Promise.all([listLabel("SENT", 15), listLabel("INBOX", 25)]);
       setSent(sentEnvs);
       setReplies(matchReplies(inboxEnvs, tracked, selfEmail));
+      // 수신자 명단 수확 — 이 브라우저의 localStorage에만 쌓여 /capture 추천 칩이 된다
+      harvestAddresses(sentEnvs.flatMap((e) => e.to), selfEmail);
       setPhase("ready");
     } catch (e) {
       setError(e instanceof Error ? e.message : "메일을 읽지 못했습니다");

@@ -285,6 +285,68 @@ function heuristicMilestones(instruction: string): GenMilestones {
   return { summary: instruction.slice(0, 60), milestones };
 }
 
+// ── quick-send: 구어 지시 → 정중한 요청 메일 초안 ────────────────────────────
+
+export interface DraftMail {
+  subject: string;
+  body: string;
+}
+
+function heuristicDraft(rawText: string): DraftMail {
+  const firstLine = rawText.split("\n").map((s) => s.trim()).filter(Boolean)[0] ?? rawText.trim();
+  return { subject: firstLine.slice(0, 100) || "요청드립니다", body: rawText.trim() };
+}
+
+const DRAFT_TOOL = {
+  name: "emit_mail",
+  description: "요청 메일의 제목과 본문을 출력합니다.",
+  input_schema: {
+    type: "object" as const,
+    additionalProperties: false,
+    properties: {
+      subject: { type: "string", description: "메일 제목 한 줄 — 요청이 드러나게" },
+      body: { type: "string", description: "정중한 존댓말 본문. 원문에 없는 내용을 지어내지 않는다" },
+    },
+    required: ["subject", "body"],
+  },
+};
+
+const DRAFT_SYSTEM =
+  "당신은 대표의 비서입니다. 대표가 구어로 던진 지시를, 받는 사람에게 보낼 짧고 정중한 요청 메일로 다듬으세요. " +
+  "규칙: 존댓말, 사실만(원문에 없는 기한·수량·조건을 만들어내지 않기), 인사 한 줄 + 요청 본문, 서명 없음(시스템이 붙임). " +
+  "원문의 의도와 항목은 하나도 빠뜨리지 마세요.";
+
+/** 빠른 보내기용 메일 초안 — 분해가 아니라 말투 정리. 실패는 조용히 원문 폴백. */
+export async function draftAskMail(rawText: string): Promise<DraftMail> {
+  if (!process.env.ANTHROPIC_API_KEY) return heuristicDraft(rawText);
+  try {
+    const client = new Anthropic();
+    const res = await Promise.race([
+      client.messages.create({
+        model: FAST_MODEL,
+        max_tokens: 1000,
+        system: DRAFT_SYSTEM,
+        tools: [DRAFT_TOOL],
+        tool_choice: { type: "tool", name: "emit_mail" },
+        messages: [{ role: "user", content: `다음 지시를 요청 메일로 다듬으세요:\n\n${rawText}` }],
+      }),
+      aiTimeout(20000),
+    ]);
+    if (!res) return heuristicDraft(rawText);
+    const block = res.content.find((b) => b.type === "tool_use");
+    if (block && block.type === "tool_use") {
+      const out = block.input as DraftMail;
+      if (out.subject?.trim() && out.body?.trim()) {
+        return { subject: out.subject.trim().slice(0, 100), body: out.body.trim() };
+      }
+    }
+    return heuristicDraft(rawText);
+  } catch (e) {
+    console.error("mail draft failed, heuristic fallback:", e);
+    return heuristicDraft(rawText);
+  }
+}
+
 // ── flagship: strategic synthesis across the instruction stream ──────────────
 
 export interface StrategyResult {

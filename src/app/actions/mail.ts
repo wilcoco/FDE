@@ -211,6 +211,7 @@ export async function composeAndSend(formData: FormData) {
   // 여러 명에게 맡기면 각자 자기 몫의 답을 빚진다 — 기본은 수신자별 개별
   // 발송·개별 루프. 끄면 공동 스레드 하나로 추적(아무나 답하면 됨).
   const individual = formData.get("individual") === "on" && to.length > 1;
+  const rawOriginal = String(formData.get("rawOriginal") ?? "").trim();
   if (to.length === 0 || !subject) redirect("/mail?error=compose_missing");
 
   const isGmailConn = conn.provider === "gmail" && !!conn.refresh;
@@ -266,7 +267,9 @@ export async function composeAndSend(formData: FormData) {
         data: {
           tenantId: tenant.id,
           authorId: user.id,
-          rawText: text ? `${subject}\n\n${text}` : subject,
+          // 빠른 보내기: AI가 다듬은 메일이 나가더라도 장부의 원문은 사장이
+          // 실제 말한 문장(rawOriginal)이다
+          rawText: rawOriginal || (text ? `${subject}\n\n${text}` : subject),
           summary,
           source: "EMAIL",
           threadMessageId: messageId,
@@ -311,8 +314,12 @@ export async function composeAndSend(formData: FormData) {
       body: text,
       replyUrl: `${publicUrl}/r/${replyToken}`,
       // 일의 전후: 분해는 발송 전에 끝났고, 그 꼭지가 메일에 그대로 실린다 —
-      // 상대는 무엇에 답해야 하는지 보면서 답한다 (제목뿐인 지시는 생략)
-      tasks: text ? milestones.map((m) => m.title) : undefined,
+      // 상대는 무엇에 답해야 하는지 보면서 답한다. 꼭지 1개 = 제목뿐인
+      // 간단 지시는 "요청 항목: 1.(같은 문장)" 중복이라 생략
+      tasks:
+        text && !(milestones.length === 1 && milestones[0].title === summary)
+          ? milestones.map((m) => m.title)
+          : undefined,
     };
     const mail = {
       from: conn.email,
