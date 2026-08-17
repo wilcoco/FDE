@@ -7,25 +7,39 @@ import { normalizeEmail } from "./inbound-email";
 
 export interface AddrEntry {
   email: string;
+  /** To 헤더의 표시 이름 ("김부장 <kim@x.com>") — 음성 지시("김부장한테")를 주소로 잇는 열쇠 */
+  name?: string;
   count: number;
   lastSeen: number; // epoch ms
 }
 
+/** 칩·추천에 필요한 최소 형태 (DB 원장은 이름 없이 이메일만 온다) */
+export interface AddrLite { email: string; name?: string }
+
 const MAX_BOOK = 200;
 
-/** 보낸 메일에서 본 주소들을 주소록에 병합 (자기 자신·비정상 주소 제외). */
+/** `"김부장" <kim@x.com>` → { name: "김부장", email: "kim@x.com" }. 이름 없으면 name="". */
+export function parseAddress(raw: string): { name: string; email: string } {
+  const m = raw.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/);
+  if (m) return { name: m[1].trim(), email: m[2].trim().toLowerCase() };
+  return { name: "", email: normalizeEmail(raw) };
+}
+
+/** 보낸 메일에서 본 주소들을 주소록에 병합 (자기 자신·비정상 주소 제외).
+ * 표시 이름은 함께 저장 — 최신의 비어있지 않은 이름이 이긴다. */
 export function mergeAddresses(book: AddrEntry[], seen: string[], now: number, self = ""): AddrEntry[] {
   const me = normalizeEmail(self);
   const map = new Map(book.map((e) => [e.email, { ...e }]));
   for (const raw of seen) {
-    const email = normalizeEmail(raw);
+    const { name, email } = parseAddress(raw);
     if (!email || !email.includes("@") || email === me) continue;
     const cur = map.get(email);
     if (cur) {
       cur.count += 1;
       cur.lastSeen = now;
+      if (name) cur.name = name;
     } else {
-      map.set(email, { email, count: 1, lastSeen: now });
+      map.set(email, { email, ...(name ? { name } : {}), count: 1, lastSeen: now });
     }
   }
   return [...map.values()]
@@ -34,30 +48,39 @@ export function mergeAddresses(book: AddrEntry[], seen: string[], now: number, s
 }
 
 /** 칩 추천 목록: 로컬 주소록(빈도·최근순) + DB 원장을 중복 없이 합쳐 상위 n. */
-export function topAddresses(book: AddrEntry[], ledger: string[], n = 8, self = ""): string[] {
+export function topAddresses(book: AddrEntry[], ledger: string[], n = 8, self = ""): AddrLite[] {
   const me = normalizeEmail(self);
-  const out: string[] = [];
-  const push = (e: string) => {
-    const email = normalizeEmail(e);
-    if (email && email.includes("@") && email !== me && !out.includes(email)) out.push(email);
+  const out: AddrLite[] = [];
+  const push = (e: AddrLite) => {
+    const email = normalizeEmail(e.email);
+    if (email && email.includes("@") && email !== me && !out.some((x) => x.email === email)) {
+      out.push({ email, ...(e.name ? { name: e.name } : {}) });
+    }
   };
-  for (const e of [...book].sort((a, b) => b.count - a.count || b.lastSeen - a.lastSeen)) push(e.email);
-  for (const e of ledger) push(e);
+  for (const e of [...book].sort((a, b) => b.count - a.count || b.lastSeen - a.lastSeen)) push(e);
+  for (const e of ledger) push({ email: e });
   return out.slice(0, n);
 }
 
 /**
- * 지시문 안에서 후보 주소를 찾는다 — 전체 주소 또는 로컬파트(3자 이상)가
- * 텍스트에 등장하면 추천. ("json한테 견적 요청" → json@icams.co.kr)
+ * 지시문 안에서 후보를 찾는다 — 전체 주소, 로컬파트(3자+), 또는 **표시 이름
+ * 토큰(2자+)**이 텍스트에 등장하면 추천. 음성 지시가 "김부장한테"라고만 해도
+ * 보낸편지함 헤더의 "김부장 <kim@x.com>"이 다리를 놓는다.
  */
-export function suggestFromText(rawText: string, candidates: string[]): string[] {
+export function suggestFromText(rawText: string, candidates: AddrLite[]): string[] {
   const t = rawText.toLowerCase();
   if (!t.trim()) return [];
   const out: string[] = [];
   for (const c of candidates) {
-    const email = normalizeEmail(c);
+    const email = normalizeEmail(c.email);
+    if (!email) continue;
     const local = email.split("@")[0];
-    if (email && (t.includes(email) || (local.length >= 3 && t.includes(local)))) out.push(email);
+    const nameTokens = (c.name ?? "").split(/\s+/).map((s) => s.trim()).filter((s) => s.length >= 2);
+    const hit =
+      t.includes(email) ||
+      (local.length >= 3 && t.includes(local)) ||
+      nameTokens.some((tok) => t.includes(tok.toLowerCase()));
+    if (hit && !out.includes(email)) out.push(email);
   }
   return out;
 }

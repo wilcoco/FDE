@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState } from "react";
 import VoiceCapture from "./VoiceCapture";
 import { previewTasks, finalizeCapture, quickSend } from "@/app/actions/capture";
-import { loadAddrBook, topAddresses, suggestFromText } from "@/lib/address-book";
+import { loadAddrBook, topAddresses, suggestFromText, type AddrLite } from "@/lib/address-book";
 
 interface Task { title: string; expectedResult: string | null; keep: boolean }
 
@@ -22,7 +22,7 @@ export default function CaptureForm({ serverStt, recent }: { serverStt: boolean;
   const [to, setTo] = useState("");
   const [summary, setSummary] = useState("");
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [chips, setChips] = useState<string[]>(recent);
+  const [chips, setChips] = useState<AddrLite[]>(recent.map((email) => ({ email })));
   const [suggested, setSuggested] = useState<string[]>([]);
   const formRef = useRef<HTMLFormElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -92,20 +92,22 @@ export default function CaptureForm({ serverStt, recent }: { serverStt: boolean;
 
   const chipRow = (
     <div className="flex flex-wrap gap-1.5">
-      {chips.map((email) => (
+      {chips.map((c) => (
         <button
-          key={email}
+          key={c.email}
           type="button"
-          onClick={() => toggleChip(email)}
+          onClick={() => toggleChip(c.email)}
+          title={c.email}
           className={`rounded-full border px-2 py-0.5 text-xs transition ${
-            toList.includes(email)
+            toList.includes(c.email)
               ? "border-indigo-400 bg-indigo-50 text-indigo-700"
-              : suggested.includes(email)
+              : suggested.includes(c.email)
               ? "border-amber-300 bg-amber-50 text-amber-700"
               : "border-gray-200 text-gray-500 hover:bg-gray-50"
           }`}
         >
-          {toList.includes(email) ? "✓ " : suggested.includes(email) ? "🤖 " : "+ "}{email}
+          {toList.includes(c.email) ? "✓ " : suggested.includes(c.email) ? "🤖 " : "+ "}
+          {c.name ? `${c.name} · ${c.email.split("@")[0]}` : c.email}
         </button>
       ))}
     </div>
